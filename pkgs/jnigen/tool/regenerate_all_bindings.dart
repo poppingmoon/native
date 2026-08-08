@@ -16,7 +16,10 @@ const scripts = [
   'test/jackson_core_test/generate.dart',
   'test/simple_package_test/generate.dart',
   'test/kotlin_test/generate.dart',
+  'test/stub_test/generate.dart',
   'example/in_app_java/tool/jnigen.dart',
+  'example/maven_libs/tool/generate_bindings.dart',
+  'example/maven_libs_groovy/tool/generate_bindings.dart',
 ];
 
 const yamlBasedExamples = [
@@ -40,5 +43,7 @@ void main() async {
               dartExecutable, ['run', 'jnigen', '--config', 'jnigen.yaml']));
   }
 
-  await Future.wait(runners.map((runner) => runner.run()).toList());
+  for (final runner in runners) {
+    await runner.run();
+  }
 }

@@ -83,9 +83,11 @@ workspace:
   - pkgs/hooks_runner/test_data/some_dev_dep
   - pkgs/hooks_runner/test_data/system_library
   - pkgs/hooks_runner/test_data/transformer
+  - pkgs/hooks_runner/test_data/treeshaking_dylib_record_use
   - pkgs/hooks_runner/test_data/treeshaking_native_libs
   - pkgs/hooks_runner/test_data/use_all_api
   - pkgs/hooks_runner/test_data/user_defines
+  - pkgs/hooks_runner/test_data/wrong_architecture_asset
   - pkgs/hooks_runner/test_data/wrong_build_output
   - pkgs/hooks_runner/test_data/wrong_build_output_2
   - pkgs/hooks_runner/test_data/wrong_build_output_3
@@ -95,6 +97,7 @@ workspace:
   # - pkgs/jni_flutter  # TODO
   # - pkgs/jni_flutter/android_test_runner  # TODO
   # - pkgs/jni_flutter/example  # TODO
+  # - pkgs/jni_util  # TODO
   # - pkgs/jni/example  # TODO
   # - pkgs/jnigen  # TODO
   # - pkgs/jnigen/android_test_runner  # TODO
@@ -117,6 +120,7 @@ workspace:
   # - pkgs/objective_c  # TODO
   # - pkgs/objective_c/example/command_line  # TODO
   # - pkgs/objective_c/example/flutter_app  # Requires Flutter.
+  # - pkgs/objective_c/example/path_provider_example  # Requires Flutter.
   - pkgs/pub_formats
   - pkgs/record_use
   - pkgs/record_use/test_data/drop_data_asset

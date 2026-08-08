@@ -24,6 +24,8 @@ jobs:
   # Check code formatting and static analysis.
   analyze:
     runs-on: macos-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: pkgs/swift2objc/
@@ -31,6 +33,8 @@ jobs:
       fail-fast: false
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
         with:
           sdk: stable
@@ -47,11 +51,15 @@ jobs:
   test-mac:
     needs: analyze
     runs-on: 'macos-latest'
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: pkgs/swift2objc/
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
         with:
           sdk: stable
@@ -61,15 +69,17 @@ jobs:
         run: dart pub global activate coverage
       - name: Run VM tests and collect coverage
         run: dart pub global run coverage:test_with_coverage --scope-output=swift2objc
+      - name: Trust Coveralls tap
+        run: brew trust coverallsapp/coveralls
       - name: Upload coverage
-        uses: coverallsapp/github-action@5cbfd81b66ca5d10c19b062c04de0199c215fb6e
+        uses: coverallsapp/github-action@0a51d2e0b5417d06e4ecceb534aec87defc53926
         with:
           flag-name: swift2objc
           github-token: ${{ secrets.GITHUB_TOKEN }}
           parallel: true
           path-to-lcov: pkgs/swift2objc/coverage/lcov.info
       - name: Upload coverage
-        uses: coverallsapp/github-action@5cbfd81b66ca5d10c19b062c04de0199c215fb6e
+        uses: coverallsapp/github-action@0a51d2e0b5417d06e4ecceb534aec87defc53926
         with:
           carryforward: "ffigen,jni,jnigen,native_pkgs_macos,native_pkgs_ubuntu,native_pkgs_windows,objective_c,swift2objc,swiftgen"
           github-token: ${{ secrets.GITHUB_TOKEN }}

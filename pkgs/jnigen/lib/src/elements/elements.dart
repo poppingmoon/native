@@ -23,6 +23,7 @@ enum GenerationStage {
   excluder,
   kotlinProcessor,
   linker,
+  stubCollector,
   renamer,
   dartGenerator;
 
@@ -68,6 +69,12 @@ class Classes implements Element<Classes> {
   }
 }
 
+enum BindingMode {
+  full,
+  stub,
+  excluded,
+}
+
 // Note: We give default values in constructor, if the field is nullable in
 // JSON. this allows us to reduce JSON size by providing Include.NON_NULL
 // option in java.
@@ -75,7 +82,7 @@ class Classes implements Element<Classes> {
 @JsonSerializable(createToJson: false)
 class ClassDecl with ClassMember, Annotated implements Element<ClassDecl> {
   ClassDecl({
-    this.isExcluded = false,
+    this.bindingMode = BindingMode.full,
     this.annotations,
     this.javadoc,
     required this.declKind,
@@ -93,7 +100,10 @@ class ClassDecl with ClassMember, Annotated implements Element<ClassDecl> {
   });
 
   @JsonKey(includeFromJson: false)
-  bool isExcluded;
+  BindingMode bindingMode;
+
+  bool get isExcluded => bindingMode == BindingMode.excluded;
+  bool get isStub => bindingMode == BindingMode.stub;
 
   @JsonKey(includeFromJson: false)
   String? userDefinedName;
@@ -746,6 +756,9 @@ class Method with ClassMember, Annotated implements Element<Method> {
 
   bool get isConstructor => name == '<init>';
 
+  bool get isDeprecated =>
+      annotations?.any((a) => a.binaryName == 'java.lang.Deprecated') ?? false;
+
   factory Method.fromJson(Map<String, dynamic> json) => _$MethodFromJson(json);
 
   Method clone({GenerationStage until = GenerationStage.userVisitors}) {
@@ -769,6 +782,9 @@ class Method with ClassMember, Annotated implements Element<Method> {
       case GenerationStage.renamer:
         cloned.finalName = finalName;
         cloned.methodKind = methodKind;
+        continue stubCollector;
+      stubCollector:
+      case GenerationStage.stubCollector:
         continue linker;
       linker:
       case GenerationStage.linker:
@@ -956,6 +972,40 @@ class JavaDocComment implements Element<JavaDocComment> {
   JavaDocComment({this.comment = ''});
 
   final String comment;
+
+  String? get deprecatedMessage {
+    final lines = comment.split('\n');
+    final messageLines = <String>[];
+    var readingDeprecatedTag = false;
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+
+      if (!readingDeprecatedTag) {
+        if (trimmed.startsWith('@deprecated')) {
+          readingDeprecatedTag = true;
+
+          final firstLine = trimmed.substring('@deprecated'.length).trim();
+          if (firstLine.isNotEmpty) {
+            messageLines.add(firstLine);
+          }
+        }
+        continue;
+      }
+
+      // A new Javadoc block tag marks the end of the deprecated message.
+      if (trimmed.startsWith('@')) {
+        break;
+      }
+
+      if (trimmed.isNotEmpty) {
+        messageLines.add(trimmed);
+      }
+    }
+
+    final message = messageLines.join('\n').trim();
+    return message.isEmpty ? null : message;
+  }
 
   factory JavaDocComment.fromJson(Map<String, dynamic> json) =>
       _$JavaDocCommentFromJson(json);

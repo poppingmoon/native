@@ -1,6 +1,24 @@
-## 2.0.0-wip
+## 2.2.0-wip
 
-- **Breaking change**: Added `outputFiles` method to `ProtocolExtension`.
+- Add `ProtocolExtension.setupLogger`, which the hooks runner calls to provide
+  the logger used for validation diagnostics before any other method is invoked
+  on the extension.
+
+## 2.1.0
+
+- Graduate `LinkInput.recordedUses` out of experimental.
+
+## 2.0.2
+
+- Update documentation for user-defines.
+
+## 2.0.1
+
+- Updated documentation for hook caching behavior and semi-hermetic environment variables.
+
+## 2.0.0
+
+- **Breaking change**: Turned `ProtocolExtension` into a base class instead of an interface, with default implementations for all methods including the newly added `outputFiles`.
 
 ## 1.0.3
 

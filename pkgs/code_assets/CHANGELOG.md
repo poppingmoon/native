@@ -1,7 +1,26 @@
-## 1.1.0-wip
+## 1.3.0-wip
 
-- Implemented `outputFiles` protocol extension method to track generated files for cache invalidation, correctly omitting non-local assets like system libraries.
-- Bumped dependency on `package:hooks` to `^2.0.0-wip`.
+- Validate bundled dynamic libraries by reading their header: when the file is
+  a recognized ELF, Mach-O, or PE binary, check that it was built for the
+  target architecture. Reject multi-architecture Mach-O output because hooks
+  run once per target architecture. A file the built-in validators do not
+  recognize, or a recognized library built for an architecture they do not
+  know, warns on the supplied logger instead of failing.
+- Bump the dependency on `package:hooks` to `^2.2.0-wip`.
+
+## 1.2.1
+
+- Avoid throwing a null-assertion error/exception when `input.config.code` is
+  accessed but `input.config.buildCodeAssets` is `false`. Instead, throw a
+  clear and descriptive `StateError`.
+
+## 1.2.0
+
+- Added an optional `sanitizer` parameter to `CodeConfig` and `CodeAssetExtension` supporting `asan`, `msan`, and `tsan`.
+
+## 1.1.0
+
+- Bumped dependency on `package:hooks` to `^2.0.0` and implemented the new `outputFiles` protocol extension method to track generated files for cache invalidation, correctly omitting non-local assets like system libraries.
 
 ## 1.0.0
 

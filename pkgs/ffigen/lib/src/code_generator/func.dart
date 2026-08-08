@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../code_generator.dart';
+import '../context.dart';
 import '../header_parser/sub_parsers/api_availability.dart';
 import '../visitor/ast.dart';
 import 'binding_string.dart';
@@ -292,20 +293,34 @@ class Parameter extends AstNode {
   Symbol symbol;
   String get name => symbol.name;
 
-  Parameter({
-    String? originalName,
-    String name = '',
+  Parameter._({
+    required this.originalName,
+    required this.symbol,
     required Type type,
     required this.objCConsumed,
-  }) : originalName = originalName ?? name,
-       symbol = Symbol(name, SymbolKind.field),
-       // A [NativeFunc] is wrapped with a pointer because this is a shorthand
+  }) : // A [NativeFunc] is wrapped with a pointer because this is a shorthand
        // used in C for Pointer to function.
        type = type.typealiasType is NativeFunc ? PointerType(type) : type;
 
-  String getNativeType({String varName = ''}) =>
-      '${type.getNativeType(varName: varName)}'
-      '${objCConsumed ? ' __attribute__((ns_consumed))' : ''}';
+  Parameter({
+    String? name,
+    String? originalName,
+    required Type type,
+    bool objCConsumed = false,
+  }) : this._(
+         originalName: originalName ?? name ?? '',
+         symbol: Symbol(name ?? originalName ?? '', SymbolKind.field),
+         type: type,
+         objCConsumed: objCConsumed,
+       );
+
+  String getNativeType(
+    Context context, {
+    String varName = '',
+    bool withAttr = true,
+  }) =>
+      '${type.getNativeType(context, varName: varName)}'
+      '${withAttr && objCConsumed ? ' __attribute__((ns_consumed))' : ''}';
 
   @override
   String toString() => '$type $symbol';
@@ -316,6 +331,13 @@ class Parameter extends AstNode {
     visitor.visit(symbol);
     visitor.visit(type);
   }
+
+  Parameter clone() => Parameter._(
+    originalName: originalName,
+    symbol: symbol.clone(),
+    type: type,
+    objCConsumed: objCConsumed,
+  );
 
   bool get isNullable => type.typealiasType is ObjCNullable;
 }

@@ -2,7 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:ffi';
 import 'dart:io';
+import 'package:ffi/ffi.dart';
 
 import 'package:ffigen/src/code_generator.dart';
 import 'package:ffigen/src/code_generator/scope.dart';
@@ -166,6 +168,25 @@ void matchObjCFileWithExpected(
   );
 }
 
+/// Generates C++ file using library and tests using [expect] with expected.
+///
+/// This will not delete the actual C++ file incase [expect] throws an error.
+void matchCppFileWithExpected(
+  Context context,
+  Library library,
+  String pathForActual,
+  List<String> pathToExpected, {
+  bool Function(String, String)? verify,
+}) {
+  matchFileWithExpected(
+    context: context,
+    pathForActual: pathForActual,
+    pathToExpected: pathToExpected,
+    fileWriter: (File file) => library.generateCppFile(file),
+    verify: verify,
+  );
+}
+
 /// Generates actual record-use mapping file using library and tests using
 /// [expect] with expected.
 ///
@@ -300,14 +321,14 @@ If the diffs are expected, rerun with UPDATE=true
 ''');
   }
 
-  _expectNoAnalysisErrors(expectedPath);
+  expectNoAnalysisErrors(expectedPath);
 
   if (actualFileExists) {
     actualFile.deleteSync();
   }
 }
 
-void _expectNoAnalysisErrors(String file) {
+void expectNoAnalysisErrors(String file) {
   if (!file.endsWith('.dart')) return;
   Process.runSync(dartExecutable, [
     'pub',
@@ -316,6 +337,7 @@ void _expectNoAnalysisErrors(String file) {
   final result = Process.runSync(dartExecutable, [
     'analyze',
     file,
+    '--fatal-infos',
   ], workingDirectory: path.dirname(file));
   if (result.exitCode != 0) print(result.stdout);
   expect(result.exitCode, 0);
@@ -354,3 +376,23 @@ FfiGenerator testConfigFromPath(String path, {Logger? logger}) {
 }
 
 bool isFlutterTester = Platform.resolvedExecutable.contains('flutter_tester');
+
+final _executeInternalCommand = () {
+  final dylib = DynamicLibrary.process();
+  if (dylib.providesSymbol('Dart_ExecuteInternalCommand')) {
+    return dylib
+        .lookup<NativeFunction<Void Function(Pointer<Char>, Pointer<Void>)>>(
+          'Dart_ExecuteInternalCommand',
+        )
+        .asFunction<void Function(Pointer<Char>, Pointer<Void>)>();
+  }
+  return null;
+}();
+
+bool canDoGC = _executeInternalCommand != null;
+
+void doGC() {
+  final gcNow = 'gc-now'.toNativeUtf8();
+  _executeInternalCommand!(gcNow.cast(), nullptr);
+  calloc.free(gcNow);
+}

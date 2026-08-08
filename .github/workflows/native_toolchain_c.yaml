@@ -1,7 +1,8 @@
 # Workflow that runs relevant tests with the clang from the Dart SDK.
 
 name: native_toolchain_c
-permissions: read-all
+permissions:
+      contents: read
 
 on:
   pull_request:
@@ -26,6 +27,8 @@ jobs:
         package: [native_toolchain_c]
 
     runs-on: ${{ matrix.os }}-latest
+    permissions:
+      contents: read
 
     defaults:
       run:
@@ -33,6 +36,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
         with:
@@ -48,7 +53,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install gcc-i686-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-riscv64-linux-gnu
 
       - name: Install rust for pkgs/native_toolchain_c/test/clinker/rust_test.dart
-        uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6
 
       - run: git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
       - run: echo "$PWD/depot_tools" >> $GITHUB_PATH

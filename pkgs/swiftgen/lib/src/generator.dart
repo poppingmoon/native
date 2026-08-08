@@ -53,6 +53,8 @@ extension SwiftGenGenerator on SwiftGenerator {
     outputFile: swiftWrapperFile.path,
     tempDir: Uri.directory(absTempDir),
     preamble: swiftWrapperFile.preamble,
+    target: target.triple,
+    sdk: target.sdk,
   ).generate(logger: logger);
 
   Future<void> _generateObjCFile(
@@ -91,7 +93,6 @@ extension SwiftGenGenerator on SwiftGenerator {
       enums: ffigen.enums,
       unnamedEnums: ffigen.unnamedEnums,
       globals: ffigen.globals,
-      integers: ffigen.integers,
       macros: ffigen.macros,
       typedefs: ffigen.typedefs,
       objectiveC: fg.ObjectiveC(
@@ -118,7 +119,7 @@ extension SwiftGenGenerator on SwiftGenerator {
         categories: ffigen.objectiveC.categories,
         externalVersions: ffigen.objectiveC.externalVersions,
       ),
-      headers: fg.Headers(
+      input: fg.Input(
         entryPoints: [Uri.file(objcHeader)],
         compilerOptions: [
           ...fg.defaultCompilerOpts(logger),

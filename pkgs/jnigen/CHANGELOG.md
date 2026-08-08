@@ -1,12 +1,25 @@
-## 0.16.1-wip
+## 0.17.0
 
 - Update kotlin-metadata-jvm, allowing JNIgen to run on newer packages.
 - Fixed incorrect code generation for generic constructors in generic classes.
   These are now generated as static `create` methods.
 - It's no longer necessary to run `flutter build apk` before running JNIgen in
   a Flutter project.
+- JNIgen now uses Flutter's JDK by default. It's no longer necessary to install
+  a separate JDK, if you already have Flutter set up for Android development.
 - Fix directory-dependent `dart format` failures by explicitly searching for the
   correct Dart executable to run.
+- Generate minimal Dart stubs for referenced but excluded Java classes, instead
+  of falling back to `JObject` (behind a `generateStubs` config flag).
+- Export and document the classes required to write custom visitors. Manual
+  import of j_elements.dart is no longer necessary.
+- **Breaking Change** (technically breaking, but unlikely to affect any users):
+  elements.dart is no longer exported from the library, as these classes were
+  always intended to be private. `Config.importedClasses` and
+  `Config.importClasses()` have also been made private.
+- Preserve Java `@deprecated` Javadoc messages in generated Dart
+  `@Deprecated` annotations.
+- Support versions 3.x of `package:package_config`.
 
 ## 0.16.0
 

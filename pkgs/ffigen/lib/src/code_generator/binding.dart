@@ -58,6 +58,9 @@ abstract class Binding extends AstNode implements Declaration {
   /// Returns the Objective C bindings, if any.
   BindingString? toObjCBindingString(Writer w) => null;
 
+  /// Returns the Cpp glue code for this binding, if any.
+  String? toCppBindingString(Writer w) => null;
+
   @override
   void visit(Visitation visitation) => visitation.visitBinding(this);
 
@@ -69,6 +72,9 @@ abstract class Binding extends AstNode implements Declaration {
 
   /// Returns whether this type is imported from package:objective_c.
   bool get isObjCImport => false;
+
+  /// Whether this binding generates `@ffi.Native` helper functions.
+  bool get hasNativeHelperFunctions => false;
 }
 
 /// Base class for bindings which look up symbols in dynamic library.

@@ -272,6 +272,7 @@ class Config {
       this.dumpJsonTo,
       this.imports,
       this.hide,
+      this.generateStubs = true,
       this.visitors}) {
     for (final className in classes) {
       _validateClassName(className);
@@ -324,8 +325,8 @@ class Config {
   /// Hide concrete classes from the imports
   final List<String>? hide;
 
-  /// Call [importClasses] before using this.
-  late final Map<String, ClassDecl> importedClasses;
+  /// Whether to generate stubs for excluded classes.
+  final bool generateStubs;
 
   /// Annotations specifying that this type is nullable.
   final List<String>? nullableAnnotations;
@@ -342,105 +343,7 @@ class Config {
   // User custom visitors.
   List<j_ast.Visitor>? visitors;
 
-  Future<void> importClasses() async {
-    importedClasses = {};
-    for (final import in [
-      // Implicitly importing package:jni symbols.
-      Uri.parse('package:jni/jni_symbols.yaml'),
-      ...?imports,
-    ]) {
-      // Getting the actual uri in case of package uris.
-      final Uri yamlUri;
-      final String importPath;
-      if (import.scheme == 'package') {
-        final packageName = import.pathSegments.first;
-        final packageRoot = await findPackageRoot(packageName);
-        if (packageRoot == null) {
-          log.fatal('package:$packageName was not found.');
-        }
-        yamlUri = packageRoot
-            .resolve('lib/')
-            .resolve(import.pathSegments.sublist(1).join('/'));
-        importPath = 'package:$packageName';
-      } else {
-        yamlUri = import;
-        importPath = ([...import.pathSegments]..removeLast()).join('/');
-      }
-      log.finest('Parsing yaml file in url $yamlUri.');
-      final YamlMap yaml;
-      try {
-        final symbolsFile = File.fromUri(yamlUri);
-        final content = symbolsFile.readAsStringSync();
-        yaml = loadYaml(content, sourceUrl: yamlUri) as YamlMap;
-      } catch (e, s) {
-        log.warning(e);
-        log.warning(s);
-        log.fatal('Error while parsing yaml file "$import".');
-      }
-      final version = Version.parse(yaml['version'] as String);
-      if (!VersionConstraint.compatibleWith(_currentVersion).allows(version)) {
-        log.fatal('"$import" is version "$version" which is not compatible with'
-            'the current JNIgen symbols version $_currentVersion');
-      }
-      final files = yaml['files'] as YamlMap;
-      for (final entry in files.entries) {
-        final filePath = entry.key as String;
-        final classes = entry.value as YamlMap;
-        for (final classEntry in classes.entries) {
-          final binaryName = classEntry.key as String;
-          if (hide?.contains(binaryName) ?? false) {
-            continue;
-          }
-          final decl = classEntry.value as YamlMap;
-          if (importedClasses.containsKey(binaryName)) {
-            log.fatal(
-              'Re-importing "$binaryName" in "$import".\n'
-              'Try hiding the class in import.',
-            );
-          }
-          final classDecl = ClassDecl(
-            declKind: DeclKind.classKind,
-            binaryName: binaryName,
-          )
-            ..path = '$importPath/$filePath'
-            ..finalName = decl['name'] as String
-            ..allTypeParams = []
-            // TODO(https://github.com/dart-lang/native/issues/746): include
-            // outerClass in the interop information.
-            ..outerClass = null;
-          for (final typeParamEntry
-              in (decl['type_params'] as YamlMap?)?.entries ??
-                  <MapEntry<dynamic, dynamic>>[]) {
-            final typeParamName = typeParamEntry.key as String;
-            final bounds = (typeParamEntry.value as YamlMap).entries.map((e) {
-              final boundName = e.key as String;
-              // Can only be DECLARED or TYPE_VARIABLE
-              if (!['DECLARED', 'TYPE_VARIABLE'].contains(e.value)) {
-                log.fatal(
-                  'Unsupported bound kind "${e.value}" for bound "$boundName" '
-                  'in type parameter "$typeParamName" '
-                  'of "$binaryName".',
-                );
-              }
-              final ReferredType type;
-              if ((e.value as String) == 'DECLARED') {
-                type = DeclaredType(binaryName: boundName);
-              } else {
-                type = TypeVar(name: boundName);
-              }
-              return type;
-            }).toList();
-            classDecl.allTypeParams.add(
-              TypeParam(name: typeParamName, bounds: bounds),
-            );
-          }
-          classDecl.methodNumsAfterRenaming =
-              (decl['methods'] as YamlMap?)?.cast() ?? {};
-          importedClasses[binaryName] = classDecl;
-        }
-      }
-    }
-  }
+  late final Map<String, ClassDecl> _importedClasses;
 
   /// Directory containing the YAML configuration file, if any.
   Uri? get configRoot => _configRoot;
@@ -558,6 +461,7 @@ class Config {
           _levels.keys.toSet(),
         ),
       ),
+      generateStubs: prov.getBool(_Props.generateStubs) ?? true,
     );
     if (missingValues.isNotEmpty) {
       stderr.write('Following config values are required but not provided\n'
@@ -575,6 +479,110 @@ class Config {
     }
     config._configRoot = configRoot;
     return config;
+  }
+}
+
+extension ConfigInternal on Config {
+  Map<String, ClassDecl> get importedClasses => _importedClasses;
+
+  Future<void> importClasses() async {
+    _importedClasses = {};
+    for (final import in [
+      // Implicitly importing package:jni symbols.
+      Uri.parse('package:jni/jni_symbols.yaml'),
+      ...?imports,
+    ]) {
+      // Getting the actual uri in case of package uris.
+      final Uri yamlUri;
+      final String importPath;
+      if (import.scheme == 'package') {
+        final packageName = import.pathSegments.first;
+        final packageRoot = await findPackageRoot(packageName);
+        if (packageRoot == null) {
+          log.fatal('package:$packageName was not found.');
+        }
+        yamlUri = packageRoot
+            .resolve('lib/')
+            .resolve(import.pathSegments.sublist(1).join('/'));
+        importPath = 'package:$packageName';
+      } else {
+        yamlUri = import;
+        importPath = ([...import.pathSegments]..removeLast()).join('/');
+      }
+      log.finest('Parsing yaml file in url $yamlUri.');
+      final YamlMap yaml;
+      try {
+        final symbolsFile = File.fromUri(yamlUri);
+        final content = symbolsFile.readAsStringSync();
+        yaml = loadYaml(content, sourceUrl: yamlUri) as YamlMap;
+      } catch (e, s) {
+        log.warning(e);
+        log.warning(s);
+        log.fatal('Error while parsing yaml file "$import".');
+      }
+      final version = Version.parse(yaml['version'] as String);
+      if (!VersionConstraint.compatibleWith(_currentVersion).allows(version)) {
+        log.fatal('"$import" is version "$version" which is not compatible with'
+            'the current JNIgen symbols version $_currentVersion');
+      }
+      final files = yaml['files'] as YamlMap;
+      for (final entry in files.entries) {
+        final filePath = entry.key as String;
+        final classes = entry.value as YamlMap;
+        for (final classEntry in classes.entries) {
+          final binaryName = classEntry.key as String;
+          if (hide?.contains(binaryName) ?? false) {
+            continue;
+          }
+          final decl = classEntry.value as YamlMap;
+          if (_importedClasses.containsKey(binaryName)) {
+            log.fatal(
+              'Re-importing "$binaryName" in "$import".\n'
+              'Try hiding the class in import.',
+            );
+          }
+          final classDecl = ClassDecl(
+            declKind: DeclKind.classKind,
+            binaryName: binaryName,
+          )
+            ..path = '$importPath/$filePath'
+            ..finalName = decl['name'] as String
+            ..allTypeParams = []
+            // TODO(https://github.com/dart-lang/native/issues/746): include
+            // outerClass in the interop information.
+            ..outerClass = null;
+          for (final typeParamEntry
+              in (decl['type_params'] as YamlMap?)?.entries ??
+                  <MapEntry<dynamic, dynamic>>[]) {
+            final typeParamName = typeParamEntry.key as String;
+            final bounds = (typeParamEntry.value as YamlMap).entries.map((e) {
+              final boundName = e.key as String;
+              // Can only be DECLARED or TYPE_VARIABLE
+              if (!['DECLARED', 'TYPE_VARIABLE'].contains(e.value)) {
+                log.fatal(
+                  'Unsupported bound kind "${e.value}" for bound "$boundName" '
+                  'in type parameter "$typeParamName" '
+                  'of "$binaryName".',
+                );
+              }
+              final ReferredType type;
+              if ((e.value as String) == 'DECLARED') {
+                type = DeclaredType(binaryName: boundName);
+              } else {
+                type = TypeVar(name: boundName);
+              }
+              return type;
+            }).toList();
+            classDecl.allTypeParams.add(
+              TypeParam(name: typeParamName, bounds: bounds),
+            );
+          }
+          classDecl.methodNumsAfterRenaming =
+              (decl['methods'] as YamlMap?)?.cast() ?? {};
+          _importedClasses[binaryName] = classDecl;
+        }
+      }
+    }
   }
 }
 
@@ -597,6 +605,7 @@ class _Props {
   static const outputStructure = '$dartCodeOutputConfig.structure';
   static const preamble = 'preamble';
   static const logLevel = 'log_level';
+  static const generateStubs = 'generate_stubs';
 
   static const nonNullAnnotations = 'non_null_annotations';
   static const nullableAnnotations = 'nullable_annotations';
