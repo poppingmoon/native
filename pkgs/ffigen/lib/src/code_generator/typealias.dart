@@ -3,6 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../code_generator.dart';
+import '../config_provider/config_types.dart';
+import '../config_provider/public_ast.dart' as public_ast;
 import '../context.dart';
 import '../strings.dart' as strings;
 import '../visitor/ast.dart';
@@ -14,6 +16,7 @@ import 'writer.dart';
 
 /// A simple Typealias, Expands to -
 ///
+/// <!-- no-source-file -->
 /// ```dart
 /// typedef $name = $type;
 /// );
@@ -25,6 +28,8 @@ class Typealias extends BindingType {
 
   // Don't code gen this alias at all, just use the [type] directly.
   bool isAnonymous;
+
+  TypealiasInclude isIncluded = TypealiasInclude.never;
 
   /// Creates a Typealias.
   ///
@@ -79,7 +84,14 @@ class Typealias extends BindingType {
     required String usr,
     required String name,
     required Type type,
-  }) : this._(usr: usr, name: name, type: type, isAnonymous: true);
+    String? dartDoc,
+  }) : this._(
+         usr: usr,
+         name: name,
+         type: type,
+         dartDoc: dartDoc,
+         isAnonymous: true,
+       );
 
   Typealias._({
     super.usr,
@@ -105,6 +117,9 @@ class Typealias extends BindingType {
     if (pointee is! NativeFunc) return null;
     return pointee.type;
   }
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.Typealias(this);
 
   @override
   BindingString toBindingString(Writer w) {

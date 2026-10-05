@@ -9,7 +9,7 @@ import 'dart:ffi' as ffi;
 import 'package:objective_c/objective_c.dart' as objc;
 import 'package:ffi/ffi.dart' as pkg_ffi;
 
-const _$objcVersionCheck = objc.ObjCVersionCheck(9, 5);
+const _$objcVersionCheck = objc.ObjCVersionCheck(9, 6);
 
 final class CollidingStructName extends ffi.Opaque {}
 
@@ -94,13 +94,13 @@ extension Renamed$Methods on Renamed {
   }
 
   /// renamedMethod:otherArg:
-  int fooBarBaz(int x, {required int y}) {
+  int fooBarBaz(int x, {required int otherArg}) {
     final _$$ref = object$.ref;
     return _objc_msgSend_1q0lyci(
       _$$ref.pointer,
       _sel_renamedMethod_otherArg_,
       x,
-      y,
+      otherArg,
     );
   }
 

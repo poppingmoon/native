@@ -3,8 +3,11 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:code_assets/code_assets.dart';
+import 'package:file/file.dart';
+import 'package:file/local.dart';
 import 'package:hooks/hooks.dart';
 import 'package:logging/logging.dart';
+import 'package:process/process.dart';
 
 import 'cbuilder.dart';
 import 'clinker.dart';
@@ -162,10 +165,18 @@ class CLibrary {
   ///
   /// [defines] are merged with the [CLibrary.defines] of this [CLibrary]. See
   /// [CLibrary.defines] for more documentation.
+  ///
+  /// If provided, uses [processManager] to spawn processes. Otherwise, uses a
+  /// [LocalProcessManager] that spawns real processes.
+  ///
+  /// If provided, uses [fileSystem] to access the file system. Otherwise, uses
+  /// a [LocalFileSystem] that accesses the real file system.
   Future<void> build({
     required BuildInput input,
     required BuildOutputBuilder output,
     Logger? logger,
+    ProcessManager? processManager,
+    FileSystem? fileSystem,
     List<AssetRouting>? routing,
     LinkModePreference? linkModePreference,
     Map<String, String?>? defines,
@@ -196,6 +207,8 @@ class CLibrary {
       input: input,
       output: output,
       logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
       routing:
           routing ??
           (input.config.linkingEnabled
@@ -230,10 +243,18 @@ class CLibrary {
   ///
   /// [defines] are merged with the [CLibrary.defines] of this [CLibrary]. See
   /// [CLibrary.defines] for more documentation.
+  ///
+  /// If provided, uses [processManager] to spawn processes. Otherwise, uses a
+  /// [LocalProcessManager] that spawns real processes.
+  ///
+  /// If provided, uses [fileSystem] to access the file system. Otherwise, uses
+  /// a [LocalFileSystem] that accesses the real file system.
   Future<void> link({
     required LinkInput input,
     required LinkOutputBuilder output,
     Logger? logger,
+    ProcessManager? processManager,
+    FileSystem? fileSystem,
     LinkerOptions? linkerOptions,
     LinkModePreference? linkModePreference,
     Map<String, String?>? defines,
@@ -247,6 +268,8 @@ class CLibrary {
       input: input,
       output: output,
       logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
       linkerOptions: linkerOptions,
       linkModePreference: linkModePreference,
       sources: assets.map((a) => a.file!.toFilePath()).toList(),

@@ -3,7 +3,7 @@ description: A simple end-to-end example showcasing FFIgen.
 publish_to: none
 
 environment:
-  sdk: '>=3.8.0 <4.0.0'
+  sdk: '>=3.10.0 <4.0.0'
 
 dependencies:
   code_assets: any
@@ -15,3 +15,13 @@ dev_dependencies:
   ffigen:
     path: '../../'
   test: ^1.25.15
+
+dependency_overrides:
+  code_assets:
+    path: ../../../code_assets
+  hooks:
+    path: ../../../hooks
+  native_toolchain_c:
+    path: ../../../native_toolchain_c
+  record_use:
+    path: ../../../record_use

@@ -3,6 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../code_generator.dart';
+import '../config_provider/config_types.dart' show VarArgFunction;
+import '../config_provider/public_ast.dart' as public_ast;
 import '../context.dart';
 import '../header_parser/sub_parsers/api_availability.dart';
 import '../visitor/ast.dart';
@@ -23,6 +25,7 @@ import 'writer.dart';
 /// The generated Dart code for this function (without `FfiNative`) is as
 /// follows.
 ///
+/// <!-- no-source-file -->
 /// ```dart
 /// int sum(int a, int b) {
 ///   return _sum(a, b);
@@ -37,31 +40,36 @@ import 'writer.dart';
 ///
 /// When using `Native`, the code is as follows.
 ///
+/// <!-- no-source-file -->
 /// ```dart
 /// @ffi.Native<ffi.Int32 Function(ffi.Int32 a, ffi.Int32 b)>('sum')
 /// external int sum(int a, int b);
 /// ```
 class Func extends LookUpBinding with HasLocalScope {
   final FunctionType functionType;
-  final bool exposeSymbolAddress;
-  final bool exposeFunctionTypedefs;
-  final bool isLeaf;
+  bool exposeSymbolAddress;
+  bool generateTypedefs;
+  bool isLeaf;
   final bool objCReturnsRetained;
   final bool useNameForLookup;
-  final bool recordUse;
+  bool recordUse;
   final ApiAvailability? apiAvailability;
+  final bool isVariadic;
+  List<VarArgFunction> varArgs = [];
 
   @override
   final bool loadFromNativeAsset;
 
   /// The symbol for the internal function or method name, used for record use
   /// mapping and avoiding collisions.
-  final Symbol funcVarSymbol;
+  Symbol? funcVarSymbol;
 
   bool get needsWrapper => !functionType.sameDartAndFfiDartType && !isInternal;
 
-  /// Contains typealias for function type if [exposeFunctionTypedefs] is true.
+  /// Contains typealias for function type if [generateTypedefs] is true.
   Typealias? _exposedFunctionTypealias;
+
+  bool isIncluded = false;
 
   /// [originalName] is looked up in dynamic library, if not
   /// provided, takes the value of [name].
@@ -74,7 +82,7 @@ class Func extends LookUpBinding with HasLocalScope {
     List<Parameter> parameters = const [],
     List<Parameter> varArgParameters = const [],
     this.exposeSymbolAddress = false,
-    this.exposeFunctionTypedefs = false,
+    this.generateTypedefs = false,
     this.isLeaf = false,
     this.objCReturnsRetained = false,
     this.useNameForLookup = false,
@@ -82,29 +90,66 @@ class Func extends LookUpBinding with HasLocalScope {
     super.isInternal,
     this.loadFromNativeAsset = false,
     this.apiAvailability,
+    this.isVariadic = false,
   }) : functionType = FunctionType(
          returnType: returnType,
          parameters: parameters,
          varArgParameters: varArgParameters,
        ),
-       funcVarSymbol = Symbol('_$name', SymbolKind.method),
        super(symbol: Symbol(name, SymbolKind.method)) {
     for (var i = 0; i < functionType.parameters.length; i++) {
       if (functionType.parameters[i].symbol.oldName.isEmpty) {
         functionType.parameters[i].symbol = Symbol('arg$i', SymbolKind.field);
       }
     }
+  }
 
-    // Get function name with first letter in upper case.
-    final upperCaseName = name[0].toUpperCase() + name.substring(1);
-    if (exposeFunctionTypedefs) {
-      _exposedFunctionTypealias = Typealias(
-        name: upperCaseName,
-        type: functionType,
-        genFfiDartType: true,
-        isInternal: true,
-      );
-    }
+  Typealias? fillExposedFunctionTypealias() {
+    if (!generateTypedefs) return null;
+    final upperCaseName = symbol.oldName.isEmpty
+        ? ''
+        : symbol.oldName[0].toUpperCase() + symbol.oldName.substring(1);
+    return _exposedFunctionTypealias ??= Typealias(
+      name: upperCaseName,
+      type: functionType,
+      genFfiDartType: true,
+      isInternal: true,
+    );
+  }
+
+  Func cloneForVarArgs(
+    String usr,
+    String name,
+    List<Parameter> varArgParameters,
+  ) {
+    final cloned = Func(
+      usr: usr,
+      name: name,
+      originalName: originalName,
+      dartDoc: dartDoc,
+      returnType: functionType.returnType,
+      parameters: [for (final p in functionType.parameters) p.clone()],
+      varArgParameters: varArgParameters,
+      exposeSymbolAddress: exposeSymbolAddress,
+      generateTypedefs: generateTypedefs,
+      isLeaf: isLeaf,
+      objCReturnsRetained: objCReturnsRetained,
+      useNameForLookup: useNameForLookup,
+      recordUse: recordUse,
+      isInternal: isInternal,
+      loadFromNativeAsset: loadFromNativeAsset,
+      apiAvailability: apiAvailability,
+      isVariadic: isVariadic,
+    );
+    cloned.isIncluded = isIncluded;
+    return cloned;
+  }
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.Func(this);
+
+  void fillFuncVarSymbol() {
+    funcVarSymbol ??= Symbol('_${symbol.oldName}', SymbolKind.method);
   }
 
   @override
@@ -127,7 +172,7 @@ class Func extends LookUpBinding with HasLocalScope {
         functionType.getFfiDartType(context, writeArgumentNames: false);
     final needsWrapper = !functionType.sameDartAndFfiDartType && !isInternal;
 
-    final funcVarName = funcVarSymbol.name;
+    final funcVarName = funcVarSymbol!.name;
     final ffiReturnType = functionType.returnType.getFfiDartType(context);
     final ffiArgDeclString = functionType.dartTypeParameters
         .map((p) => '${p.type.getFfiDartType(context)} ${p.name},\n')
@@ -267,7 +312,7 @@ late final $funcVarName = $funcPointerName.asFunction<$dartType>($isLeafString);
 
   (String, String)? get recordUseMapping => recordUse
       ? (
-          needsWrapper ? funcVarSymbol.name : name,
+          needsWrapper ? funcVarSymbol!.name : name,
           useNameForLookup ? name : originalName,
         )
       : null;

@@ -12,6 +12,7 @@ import 'package:package_config/package_config.dart';
 import 'package:yaml/yaml.dart' as yaml;
 
 import '../../ffigen.dart';
+import '../header_parser.dart';
 
 final _ansi = Ansi(Ansi.terminalSupportsAnsi);
 final logger = () {
@@ -60,7 +61,11 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  generator.generate(logger: logger);
+  try {
+    await generator.generate(logger: logger);
+  } on HeaderParserException {
+    exit(1);
+  }
 }
 
 FfiGenerator getGenerator(ArgResults result, PackageConfig? packageConfig) {
@@ -73,6 +78,12 @@ FfiGenerator getGenerator(ArgResults result, PackageConfig? packageConfig) {
   } else {
     config = getConfigFromPubspec(packageConfig);
   }
+
+  logger.warning(
+    'The YAML configuration format is deprecated and will be removed in a '
+    'future release. Please migrate to the programmatic Dart generator API. '
+    'See skills/ffigen-migrate-yaml-to-dart for migration instructions.',
+  );
 
   // Add compiler options from command line.
   if (result.wasParsed(compilerOpts)) {

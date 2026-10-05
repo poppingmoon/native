@@ -38,18 +38,19 @@ Future<void> main() async {
 
     // Run JNIgen.
     final thisDir = Uri.directory(p.join(pkgDir, 'test', 'large_java_test'));
-    await generateJniBindings(
-      Config(
-        outputConfig: OutputConfig(
-          dartConfig: DartCodeOutputConfig(
-            path: thisDir.resolve('temp/large_bindings.dart'),
-            structure: OutputStructure.singleFile,
-          ),
-        ),
+    final generator = JniGenerator(
+      input: Input(
         sourcePath: [thisDir.resolve('java/')],
         classes: ['com.example'],
       ),
+      output: Output(
+        dart: DartOutput(
+          path: thisDir.resolve('temp/large_bindings.dart'),
+          structure: OutputStructure.singleFile,
+        ),
+      ),
     );
+    await generator.generate();
 
     // Check for diffs.
     final expPath =

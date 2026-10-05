@@ -2,9 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:io';
-
+import 'package:file/file.dart' show FileSystem;
 import 'package:logging/logging.dart';
+import 'package:process/process.dart';
 
 import '../tool/tool.dart';
 import '../tool/tool_instance.dart';
@@ -54,18 +54,24 @@ class XCodeSdkResolver implements ToolResolver {
           sdk: 'macosx',
           tool: macosxSdk,
           logger: context.logger,
+          processManager: context.processManager,
+          fileSystem: context.fileSystem,
         ),
         ...await tryResolveSdk(
           xcrunInstance: xcrunInstance,
           sdk: 'iphoneos',
           tool: iPhoneOSSdk,
           logger: context.logger,
+          processManager: context.processManager,
+          fileSystem: context.fileSystem,
         ),
         ...await tryResolveSdk(
           xcrunInstance: xcrunInstance,
           sdk: 'iphonesimulator',
           tool: iPhoneSimulatorSdk,
           logger: context.logger,
+          processManager: context.processManager,
+          fileSystem: context.fileSystem,
         ),
       ],
       // xcrun --sdk macosx --show-sdk-path)
@@ -77,11 +83,14 @@ class XCodeSdkResolver implements ToolResolver {
     required String sdk,
     required Tool tool,
     required Logger? logger,
+    required ProcessManager processManager,
+    required FileSystem fileSystem,
   }) async {
     final result = await runProcess(
       executable: xcrunInstance.uri,
       arguments: ['--sdk', sdk, '--show-sdk-path'],
       logger: logger,
+      processManager: processManager,
     );
     if (result.exitCode == 1) {
       assert(result.stderr.contains('cannot be located'));
@@ -92,12 +101,12 @@ class XCodeSdkResolver implements ToolResolver {
     final uriSymbolic = Uri.directory(result.stdout.trim());
     logger?.fine('Found $sdk at ${uriSymbolic.toFilePath()}');
     final uri = Uri.directory(
-      await Directory.fromUri(uriSymbolic).resolveSymbolicLinks(),
+      await fileSystem.directory(uriSymbolic).resolveSymbolicLinks(),
     );
     if (uriSymbolic != uri) {
       logger?.fine('Found $sdk at ${uri.toFilePath()}');
     }
-    assert(await Directory.fromUri(uri).exists());
+    assert(await fileSystem.directory(uri).exists());
     return [ToolInstance(tool: tool, uri: uri)];
   }
 }

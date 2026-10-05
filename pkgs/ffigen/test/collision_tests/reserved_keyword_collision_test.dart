@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:ffigen/src/config_provider.dart';
+import 'package:ffigen/src/config_provider/public_ast.dart' as public_ast;
 import 'package:ffigen/src/header_parser.dart' as parser;
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
@@ -11,16 +12,26 @@ import '../test_utils.dart';
 
 void main() {
   group('reserved_keyword_collision_test', () {
-    test('reserved keyword collision', () {
+    test('reserved keyword collision', () async {
       final context = testContext();
       final library = parser.parse(
         testContext(
           FfiGenerator(
             output: Output(
-              dartFile: Uri.file('unused'),
+              dart: DartOutput(path: Uri.file('unused')),
               style: const DynamicLibraryBindings(),
             ),
-
+            visitors: [
+              public_ast.Visitor(
+                func: (node) => node.isIncluded = true,
+                struct: (node) => node.isIncluded = true,
+                union: (node) => node.isIncluded = true,
+                enumClass: (node) => node.isIncluded = true,
+                global: (node) => node.isIncluded = true,
+                macroConstant: (node) => node.isIncluded = true,
+                typealias: (node) => node.isIncluded = .always,
+              ),
+            ],
             input: Input(
               entryPoints: [
                 Uri.file(
@@ -33,19 +44,10 @@ void main() {
                 ),
               ],
             ),
-            structs: Structs.includeAll,
-            unions: Unions.includeAll,
-            enums: Enums.includeAll,
-            functions: Functions.includeAll,
-            globals: Globals.includeAll,
-            typedefs: Typedefs(
-              include: (Declaration decl) => true,
-              includeUnused: true,
-            ),
           ),
         ),
       );
-      matchLibraryWithExpected(
+      await matchLibraryWithExpected(
         context,
         library,
         'reserved_keyword_collision_test_output.dart',

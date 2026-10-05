@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:jni_util/jni_util.dart' as jni_util;
 import 'package:jnigen/jnigen.dart';
-import 'package:logging/logging.dart';
 import 'package:path/path.dart';
 
 const preamble = '''
@@ -16,7 +15,7 @@ const preamble = '''
 
 ''';
 
-Config getConfig() {
+JniGenerator getConfig() {
   final testRoot = join('test', 'stub_test');
   final javaPath = join(testRoot, 'java');
   final dartPath = join(testRoot, 'bindings.dart');
@@ -37,22 +36,23 @@ Config getConfig() {
     exit(1);
   }
 
-  return Config(
-    sourcePath: [Uri.directory(javaPath)],
-    classPath: [Uri.directory(javaPath)],
-    classes: ['com.example.A', 'com.example.C'],
-    outputConfig: OutputConfig(
-      dartConfig: DartCodeOutputConfig(
+  return JniGenerator(
+    input: Input(
+      sourcePath: [Uri.directory(javaPath)],
+      classPath: [Uri.directory(javaPath)],
+      classes: ['com.example.A', 'com.example.C'],
+    ),
+    output: Output(
+      dart: DartOutput(
         path: Uri.file(dartPath),
         structure: OutputStructure.singleFile,
       ),
+      generateStubs: true,
+      preamble: preamble,
     ),
-    generateStubs: true,
-    logLevel: Level.INFO,
-    preamble: preamble,
   );
 }
 
 void main() async {
-  await generateJniBindings(getConfig());
+  await getConfig().generate();
 }

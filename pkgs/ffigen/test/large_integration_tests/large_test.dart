@@ -2,20 +2,20 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:ffigen/src/code_generator/imports.dart';
-import 'package:ffigen/src/config_provider/config.dart';
-import 'package:ffigen/src/config_provider/config_types.dart';
+import 'package:ffigen/ffigen.dart';
+import 'package:ffigen/src/code_generator/imports.dart' show ffiImport;
 import 'package:ffigen/src/context.dart';
 import 'package:ffigen/src/header_parser.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 
+import '../../tool/generate_clang_bindings.dart' as generate_clang_bindings;
 import '../test_utils.dart';
 
 void main() {
   group('large_test', () {
-    test('Libclang test', () {
+    test('Libclang test', () async {
       final includeDir = path.join(
         packagePathForTests,
         'third_party',
@@ -29,7 +29,7 @@ void main() {
       );
       final generator = FfiGenerator(
         output: Output(
-          dartFile: Uri.file('unused'),
+          dart: DartOutput(path: Uri.file('unused')),
           commentType: const CommentType(
             CommentStyle.doxygen,
             CommentLength.brief,
@@ -40,7 +40,8 @@ void main() {
           ),
         ),
         input: Input(
-          compilerOptions: [...defaultCompilerOpts(logger), '-I$includeDir'],
+          compilerOptions: ['-I$includeDir'],
+          appendCompilerOptions: true,
           entryPoints: [
             Uri.file(
               path.join(
@@ -63,19 +64,26 @@ void main() {
             'Index.h',
           ].any((filename) => header.pathSegments.last == filename),
         ),
-        functions: Functions.includeAll,
-        structs: Structs.includeAll,
-        enums: Enums.includeAll,
-        macros: Macros.includeAll,
-        typedefs: Typedefs(include: (_) => true),
         importType: (decl) => decl.originalName == 'time_t'
             ? ImportedType(ffiImport, 'Int64', 'int', 'time_t')
             : null,
+        visitors: [
+          Visitor(
+            func: (node) => node.isIncluded = true,
+            struct: (node) => node.isIncluded = true,
+            union: (node) => node.isIncluded = true,
+            enumClass: (node) => node.isIncluded = true,
+            unnamedEnumConstant: (node) => node.isIncluded = true,
+            global: (node) => node.isIncluded = true,
+            macroConstant: (node) => node.isIncluded = true,
+            typealias: (node) => node.isIncluded = .ifUsed,
+          ),
+        ],
       );
       final library = parse(Context(logger, generator));
       final context = testContext();
 
-      matchLibraryWithExpected(
+      await matchLibraryWithExpected(
         context,
         library,
         'large_test_libclang.dart',
@@ -125,10 +133,10 @@ void main() {
       }
     });
 
-    test('CJSON test', () {
+    test('CJSON test', () async {
       final generator = FfiGenerator(
         output: Output(
-          dartFile: Uri.file('unused'),
+          dart: DartOutput(path: Uri.file('unused')),
           style: const DynamicLibraryBindings(
             wrapperName: 'CJson',
             wrapperDocComment: 'Bindings to Cjson.',
@@ -147,28 +155,37 @@ void main() {
           ],
           include: (Uri header) => header.pathSegments.last == 'cJSON.h',
         ),
-        functions: Functions.includeAll,
-        structs: Structs.includeAll,
-        macros: Macros.includeAll,
-        typedefs: Typedefs.includeAll,
+        visitors: [
+          Visitor(
+            func: (node) => node.isIncluded = true,
+            struct: (node) => node.isIncluded = true,
+            union: (node) => node.isIncluded = true,
+            enumClass: (node) => node.isIncluded = true,
+            unnamedEnumConstant: (node) => node.isIncluded = true,
+            global: (node) => node.isIncluded = true,
+            macroConstant: (node) => node.isIncluded = true,
+            typealias: (node) => node.isIncluded = .ifUsed,
+          ),
+        ],
       );
       final context = testContext(generator);
       final library = parse(context);
 
-      matchLibraryWithExpected(context, library, 'large_test_cjson.dart', [
-        'test',
-        'large_integration_tests',
-        '_expected_cjson_bindings.dart',
-      ]);
+      await matchLibraryWithExpected(
+        context,
+        library,
+        'large_test_cjson.dart',
+        ['test', 'large_integration_tests', '_expected_cjson_bindings.dart'],
+      );
     });
 
-    test('SQLite test', () {
+    test('SQLite test', () async {
       // Excluding functions etc that use 'va_list' because it can either be a
       // Pointer<__va_list_tag> or int depending on the OS.
       final vaRegex = RegExp(r'(^|[^a-z])va($|[^a-z])');
       final generator = FfiGenerator(
         output: Output(
-          dartFile: Uri.file('unused'),
+          dart: DartOutput(path: Uri.file('unused')),
           style: const DynamicLibraryBindings(
             wrapperName: 'SQLite',
             wrapperDocComment: 'Bindings to SQLite.',
@@ -188,40 +205,61 @@ void main() {
           ],
           include: (Uri header) => header.pathSegments.last == 'sqlite3.h',
         ),
-        functions: Functions(
-          include: (declaration) => !{
-            'sqlite3_vmprintf',
-            'sqlite3_vsnprintf',
-            'sqlite3_str_vappendf',
-          }.contains(declaration.originalName),
-        ),
-        structs: Structs(
-          include: (declaration) => !vaRegex.hasMatch(declaration.originalName),
-        ),
-        globals: Globals.includeAll,
-        macros: Macros.includeAll,
-        typedefs: Typedefs(
-          include: (declaration) => !vaRegex.hasMatch(declaration.originalName),
-        ),
+        visitors: [
+          Visitor(
+            func: (node) {
+              if ({
+                'sqlite3_vmprintf',
+                'sqlite3_vsnprintf',
+                'sqlite3_str_vappendf',
+              }.contains(node.originalName)) {
+                node.isIncluded = false;
+              } else {
+                node.isIncluded = true;
+              }
+            },
+            struct: (node) {
+              if (vaRegex.hasMatch(node.originalName)) {
+                node.isIncluded = false;
+              } else {
+                node.isIncluded = true;
+              }
+              node.dependencies = CompoundDependencies.full;
+            },
+            typealias: (node) {
+              if (vaRegex.hasMatch(node.originalName)) {
+                node.isIncluded = .never;
+              } else {
+                node.isIncluded = .ifUsed;
+              }
+            },
+            union: (node) => node.isIncluded = true,
+            enumClass: (node) => node.isIncluded = true,
+            unnamedEnumConstant: (node) => node.isIncluded = true,
+            global: (node) => node.isIncluded = true,
+            macroConstant: (node) => node.isIncluded = true,
+          ),
+        ],
       );
       final context = testContext(generator);
       final library = parse(context);
 
-      matchLibraryWithExpected(context, library, 'large_test_sqlite.dart', [
-        'test',
-        'large_integration_tests',
-        '_expected_sqlite_bindings.dart',
-      ]);
+      await matchLibraryWithExpected(
+        context,
+        library,
+        'large_test_sqlite.dart',
+        ['test', 'large_integration_tests', '_expected_sqlite_bindings.dart'],
+      );
     });
 
-    test('Libclang config test', () {
-      final config = testConfigFromPath(
-        path.join(packagePathForTests, 'tool', 'libclang_config.yaml'),
+    test('Libclang config test', () async {
+      final config = generate_clang_bindings.getConfig(
+        Uri.file(path.join(packagePathForTests, '')),
       );
       final context = testContext(config);
       final library = parse(context);
 
-      matchLibraryWithExpected(context, library, 'libclang_config.dart', [
+      await matchLibraryWithExpected(context, library, 'libclang_config.dart', [
         'lib',
         'src',
         'header_parser',

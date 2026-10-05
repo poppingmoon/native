@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import '../config_provider/public_ast.dart' as public_ast;
 import '../visitor/ast.dart';
 
 import 'compound.dart';
@@ -16,6 +17,7 @@ import 'compound.dart';
 /// };
 /// ```
 /// The generated dart code is -
+/// <!-- no-source-file -->
 /// ```dart
 /// final class Union extends ffi.Union{
 ///  @ffi.Int32()
@@ -40,10 +42,15 @@ class Union extends Compound {
     required super.context,
     super.nativeType,
     super.apiAvailability,
+    super.sizeInBytes,
+    super.dependencies,
   });
 
   @override
   int? get pack => null;
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.Union(this);
 
   @override
   void visit(Visitation visitation) => visitation.visitUnion(this);

@@ -23,6 +23,10 @@ final class Architecture {
   /// The [AArch64](https://en.wikipedia.org/wiki/AArch64) architecture.
   static const Architecture arm64 = Architecture._('arm64');
 
+  /// The [arm64e](https://developer.apple.com/documentation/security/preparing-your-app-to-work-with-pointer-authentication)
+  /// architecture (ARM64 with pointer authentication).
+  static const Architecture arm64e = Architecture._('arm64e');
+
   /// The [IA-32](https://en.wikipedia.org/wiki/IA-32) architecture.
   static const Architecture ia32 = Architecture._('ia32');
 
@@ -39,6 +43,7 @@ final class Architecture {
   static const List<Architecture> values = [
     arm,
     arm64,
+    arm64e,
     ia32,
     riscv32,
     riscv64,
@@ -81,33 +86,27 @@ final class Architecture {
   ///
   /// The name can be obtained from [Architecture.name] or
   /// [Architecture.toString].
-  factory Architecture.fromString(String name) =>
-      ArchitectureSyntaxExtension.fromSyntax(ArchitectureSyntax.fromJson(name));
+  factory Architecture.fromString(String name) => values.firstWhere(
+    (e) => e.name == name,
+    orElse: () => Architecture._(name),
+  );
 
   /// The current [Architecture].
   static final Architecture current = _abiToArch[Abi.current()]!;
+
+  @override
+  bool operator ==(Object other) => other is Architecture && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
 }
 
 /// Extension methods for [Architecture] to convert to and from the syntax.
 extension ArchitectureSyntaxExtension on Architecture {
-  static final _toSyntax = {
-    for (final item in Architecture.values)
-      item: ArchitectureSyntax.fromJson(item.name),
-  };
-
-  static final _fromSyntax = {
-    for (var entry in _toSyntax.entries) entry.value: entry.key,
-  };
-
   /// Converts this [Architecture] to its corresponding [ArchitectureSyntax].
-  ArchitectureSyntax toSyntax() => _toSyntax[this]!;
+  ArchitectureSyntax toSyntax() => ArchitectureSyntax.fromJson(name);
 
   /// Converts an [ArchitectureSyntax] to its corresponding [Architecture].
   static Architecture fromSyntax(ArchitectureSyntax syntax) =>
-      switch (_fromSyntax[syntax]) {
-        null => throw FormatException(
-          'The architecture "${syntax.name}" is not known',
-        ),
-        final arch => arch,
-      };
+      Architecture.fromString(syntax.name);
 }

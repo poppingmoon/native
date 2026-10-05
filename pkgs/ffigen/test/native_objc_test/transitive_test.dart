@@ -14,19 +14,17 @@ import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 import '../test_utils.dart';
 
-String generate({
-  bool includeTransitiveObjCInterfaces = false,
-  bool includeTransitiveObjCProtocols = false,
-  bool includeTransitiveObjCCategories = false,
-}) {
-  FfiGenerator(
+Future<String> generate({bool includeTransitiveObjCCategories = true}) async {
+  final generator = FfiGenerator(
     output: Output(
-      dartFile: Uri.file(
-        path.join(
-          packagePathForTests,
-          'test',
-          'native_objc_test',
-          'transitive_test_bindings.dart',
+      dart: DartOutput(
+        path: Uri.file(
+          path.join(
+            packagePathForTests,
+            'test',
+            'native_objc_test',
+            'transitive_test_bindings.dart',
+          ),
         ),
       ),
       format: false,
@@ -47,28 +45,27 @@ String generate({
         ),
       ],
     ),
-    objectiveC: ObjectiveC(
-      interfaces: Interfaces(
-        include: (decl) => {
-          'DirectlyIncluded',
-          'DirectlyIncludedWithProtocol',
-          'DirectlyIncludedIntForCat',
-          'Bug2935DirectInterface',
-        }.contains(decl.originalName),
-        includeTransitive: includeTransitiveObjCInterfaces,
+    objectiveC: const ObjectiveC(),
+    visitors: [
+      Visitor(
+        objCInterface: (node) {
+          node.includeCategories = includeTransitiveObjCCategories;
+          const include = {
+            'DirectlyIncluded',
+            'DirectlyIncludedWithProtocol',
+            'DirectlyIncludedIntForCat',
+            'Bug2935DirectInterface',
+          };
+          node.isIncluded = include.contains(node.originalName);
+        },
+        objCProtocol: (node) =>
+            node.isIncluded = node.originalName == 'DirectlyIncludedProtocol',
+        objCCategory: (node) =>
+            node.isIncluded = node.originalName == 'DirectlyIncludedCategory',
       ),
-      protocols: Protocols(
-        include: (decl) =>
-            {'DirectlyIncludedProtocol'}.contains(decl.originalName),
-        includeTransitive: includeTransitiveObjCProtocols,
-      ),
-      categories: Categories(
-        include: (decl) =>
-            {'DirectlyIncludedCategory'}.contains(decl.originalName),
-        includeTransitive: includeTransitiveObjCCategories,
-      ),
-    ),
-  ).generate(logger: createTestLogger());
+    ],
+  );
+  await generator.generate(logger: createTestLogger());
   final file = path.join(
     packagePathForTests,
     'test',
@@ -128,45 +125,8 @@ void main() {
     }
 
     group('transitive interfaces', () {
-      test('included', () {
-        bindings = generate(includeTransitiveObjCInterfaces: true);
-
-        expect(incItf('DoublyTransitive'), Inclusion.included);
-        expect(incItf('TransitiveSuper'), Inclusion.included);
-        expect(incItf('Transitive'), Inclusion.included);
-        expect(incItf('SuperSuperType'), Inclusion.included);
-        expect(incItf('DoublySuperTransitive'), Inclusion.included);
-        expect(incItf('SuperTransitive'), Inclusion.included);
-        expect(incItf('SuperType'), Inclusion.included);
-        expect(incItf('DirectlyIncluded'), Inclusion.included);
-        expect(incItf('NotIncludedSuperType'), Inclusion.omitted);
-        expect(incItf('NotIncludedTransitive'), Inclusion.omitted);
-        expect(incItf('NotIncludedSuperType'), Inclusion.omitted);
-        expect(incItf('Bug2935DirectInterface'), Inclusion.included);
-        expect(incItf('Bug2935TransitiveInterface'), Inclusion.included);
-        expect(incItf('Bug2935TransitiveBlockInterface'), Inclusion.included);
-
-        expect(bindings.contains('doubleMethod'), isTrue);
-        expect(bindings.contains('transitiveSuperMethod'), isTrue);
-        expect(bindings.contains('transitiveMethod'), isTrue);
-        expect(bindings.contains('superSuperMethod'), isTrue);
-        expect(bindings.contains('doublySuperMethod'), isTrue);
-        expect(bindings.contains('superTransitiveMethod'), isTrue);
-        expect(bindings.contains('superMethod'), isTrue);
-        expect(bindings.contains('directMethod'), isTrue);
-        expect(bindings.contains('notIncludedSuperMethod'), isFalse);
-        expect(bindings.contains('notIncludedTransitiveMethod'), isFalse);
-        expect(bindings.contains('notIncludedMethod'), isFalse);
-        expect(bindings.contains('bug2935DirectInterfaceMethod'), isTrue);
-        expect(bindings.contains('bug2935TransitiveInterfaceMethod'), isTrue);
-        expect(
-          bindings.contains('bug2935TransitiveBlockInterfaceMethod'),
-          isTrue,
-        );
-      });
-
-      test('stubbed', () {
-        bindings = generate(includeTransitiveObjCInterfaces: false);
+      test('stubbed', () async {
+        bindings = await generate();
 
         expect(incItf('DoublyTransitive'), Inclusion.omitted);
         expect(incItf('TransitiveSuper'), Inclusion.stubbed);
@@ -204,46 +164,8 @@ void main() {
     });
 
     group('transitive protocols', () {
-      test('included', () {
-        bindings = generate(includeTransitiveObjCProtocols: true);
-
-        expect(incProto('DoublyTransitiveProtocol'), Inclusion.included);
-        expect(incProto('TransitiveSuperProtocol'), Inclusion.included);
-        expect(incProto('TransitiveProtocol'), Inclusion.included);
-        expect(incProto('SuperSuperProtocol'), Inclusion.included);
-        expect(incProto('DoublySuperTransitiveProtocol'), Inclusion.included);
-        expect(incProto('SuperTransitiveProtocol'), Inclusion.included);
-        expect(incProto('SuperProtocol'), Inclusion.included);
-        expect(incProto('AnotherSuperProtocol'), Inclusion.included);
-        expect(incProto('DirectlyIncludedProtocol'), Inclusion.included);
-        expect(incProto('NotIncludedSuperProtocol'), Inclusion.omitted);
-        expect(incProto('NotIncludedTransitiveProtocol'), Inclusion.omitted);
-        expect(incProto('NotIncludedProtocol'), Inclusion.omitted);
-        expect(incProto('SuperFromInterfaceProtocol'), Inclusion.included);
-        expect(incProto('TransitiveFromInterfaceProtocol'), Inclusion.included);
-        expect(incItf('DirectlyIncludedWithProtocol'), Inclusion.included);
-        expect(incProto('Bug2935TransitiveProtocol'), Inclusion.included);
-
-        expect(bindings.contains('doubleProtoMethod'), isTrue);
-        expect(bindings.contains('transitiveSuperProtoMethod'), isTrue);
-        expect(bindings.contains('transitiveProtoMethod'), isTrue);
-        expect(bindings.contains('superSuperProtoMethod'), isTrue);
-        expect(bindings.contains('doublySuperProtoMethod'), isTrue);
-        expect(bindings.contains('superTransitiveProtoMethod'), isTrue);
-        expect(bindings.contains('superProtoMethod'), isTrue);
-        expect(bindings.contains('anotherSuperProtoMethod'), isTrue);
-        expect(bindings.contains('directProtoMethod'), isTrue);
-        expect(bindings.contains('notIncludedSuperProtoMethod'), isFalse);
-        expect(bindings.contains('notIncludedTransitiveProtoMethod'), isFalse);
-        expect(bindings.contains('notIncludedProtoMethod'), isFalse);
-        expect(bindings.contains('superFromInterfaceProtoMethod'), isTrue);
-        expect(bindings.contains('transitiveFromInterfaceProtoMethod'), isTrue);
-        expect(bindings.contains('directlyIncludedWithProtoMethod'), isTrue);
-        expect(bindings.contains('bug2935TransitiveProtocolMethod'), isTrue);
-      });
-
-      test('not included', () {
-        bindings = generate(includeTransitiveObjCProtocols: false);
+      test('not included', () async {
+        bindings = await generate();
 
         expect(incProto('DoublyTransitiveProtocol'), Inclusion.omitted);
         expect(incProto('TransitiveSuperProtocol'), Inclusion.stubbed);
@@ -285,8 +207,8 @@ void main() {
     });
 
     group('transitive categories', () {
-      test('included', () {
-        bindings = generate(includeTransitiveObjCCategories: true);
+      test('included', () async {
+        bindings = await generate(includeTransitiveObjCCategories: true);
 
         expect(incItf('IntOfDirectCat'), Inclusion.stubbed);
         expect(incItf('TransitiveIntOfDirectCat'), Inclusion.stubbed);
@@ -320,8 +242,8 @@ void main() {
         expect(bindings.contains('notIncludedCategoryMethod'), isFalse);
       });
 
-      test('not included', () {
-        bindings = generate(includeTransitiveObjCCategories: false);
+      test('not included', () async {
+        bindings = await generate(includeTransitiveObjCCategories: false);
 
         expect(incItf('IntOfDirectCat'), Inclusion.stubbed);
         expect(incItf('TransitiveIntOfDirectCat'), Inclusion.stubbed);

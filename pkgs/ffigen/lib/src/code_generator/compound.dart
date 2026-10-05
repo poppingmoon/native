@@ -3,7 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../code_generator.dart';
-import '../config_provider.dart';
+import '../config_provider/config.dart' show EnumStyle;
+import '../config_provider/config_types.dart';
 import '../context.dart';
 import '../header_parser/sub_parsers/api_availability.dart';
 import '../visitor/ast.dart';
@@ -28,6 +29,9 @@ abstract class Compound extends BindingType with HasLocalScope {
   /// or 16.
   int? get pack;
 
+  /// How dependencies of this compound should be generated.
+  CompoundDependencies dependencies;
+
   /// Marker for checking if the dependencies are parsed.
   bool parsedDependencies = false;
 
@@ -40,6 +44,12 @@ abstract class Compound extends BindingType with HasLocalScope {
 
   final ApiAvailability? apiAvailability;
 
+  /// The size of this compound in bytes, or `null` if the compound is
+  /// incomplete, opaque, or has an unknown layout at parse time.
+  final int? sizeInBytes;
+
+  bool isIncluded = false;
+
   Compound({
     super.usr,
     super.originalName,
@@ -47,10 +57,11 @@ abstract class Compound extends BindingType with HasLocalScope {
     this.isIncomplete = false,
     super.dartDoc,
     List<CompoundMember>? members,
-    super.isInternal,
     required this.context,
     String? nativeType,
     this.apiAvailability,
+    this.sizeInBytes,
+    this.dependencies = CompoundDependencies.opaque,
   }) : members = members ?? [],
        nativeType = nativeType ?? originalName ?? name;
 
@@ -80,7 +91,7 @@ abstract class Compound extends BindingType with HasLocalScope {
 
   bool _isEnumDartStyleMember(CompoundMember member) {
     final type = member.type;
-    return type is EnumClass && type.style == EnumStyle.dartEnum;
+    return type is EnumClass && type.effectiveStyle == EnumStyle.dartEnum;
   }
 
   String _memberStorageName(CompoundMember member) {
@@ -190,8 +201,8 @@ abstract class Compound extends BindingType with HasLocalScope {
         );
       }
       if (m.type case EnumClass(
-        :final style,
-      ) when style == EnumStyle.dartEnum) {
+        :final effectiveStyle,
+      ) when effectiveStyle == EnumStyle.dartEnum) {
         final enumName = m.type.getDartType(context);
         final memberName = m.name;
         s.write(
@@ -252,8 +263,8 @@ class CompoundMember extends AstNode {
   final String originalName;
   final Type type;
 
-  final Symbol _symbol;
-  String get name => _symbol.name;
+  final Symbol symbol;
+  String get name => symbol.name;
 
   CompoundMember({
     String? originalName,
@@ -261,12 +272,12 @@ class CompoundMember extends AstNode {
     required this.type,
     this.dartDoc,
   }) : originalName = originalName ?? name,
-       _symbol = Symbol(name, SymbolKind.field);
+       symbol = Symbol(name, SymbolKind.field);
 
   @override
   void visitChildren(Visitor visitor) {
     super.visitChildren(visitor);
-    visitor.visit(_symbol);
+    visitor.visit(symbol);
     visitor.visit(type);
   }
 }

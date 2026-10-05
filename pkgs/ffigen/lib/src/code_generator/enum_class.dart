@@ -5,6 +5,7 @@
 import 'package:collection/collection.dart';
 
 import '../config_provider.dart';
+import '../config_provider/public_ast.dart' as public_ast;
 import '../context.dart';
 import '../header_parser/sub_parsers/api_availability.dart';
 import '../visitor/ast.dart';
@@ -24,6 +25,7 @@ import 'writer.dart';
 /// ```
 /// The generated dart code is
 ///
+/// <!-- no-source-file -->
 /// ```dart
 /// enum Fruits {
 ///   apple(0),
@@ -51,12 +53,20 @@ class EnumClass extends BindingType with HasLocalScope {
   Context context;
 
   /// Whether this enum should be generated as a collection of integers.
-  EnumStyle style;
+  EnumStyle? style;
+
+  /// Effective style for this enum.
+  EnumStyle get effectiveStyle => style ?? EnumStyle.dartEnum;
 
   /// Don't code gen this alias at all, just use the [nativeType] directly.
   bool isAnonymous;
 
+  /// Whether warnings should be silenced for this enum.
+  bool silenceWarning;
+
   final ApiAvailability? apiAvailability;
+
+  bool isIncluded = false;
 
   EnumClass({
     super.usr,
@@ -66,11 +76,16 @@ class EnumClass extends BindingType with HasLocalScope {
     Type? nativeType,
     List<EnumConstant>? enumConstants,
     required this.context,
-    this.style = EnumStyle.dartEnum,
+    this.style,
     this.isAnonymous = false,
+    this.silenceWarning = false,
     this.apiAvailability,
   }) : nativeType = nativeType ?? intType,
        enumConstants = enumConstants ?? [];
+
+  @override
+  public_ast.AstNode? toPublicAstNode() =>
+      isAnonymous ? null : public_ast.EnumClass(this);
 
   /// Returns a string to declare the enum member and any documentation it may
   /// have had.
@@ -212,7 +227,7 @@ class EnumClass extends BindingType with HasLocalScope {
     _writeDartDoc(s);
     if (enumConstants.isEmpty) {
       _writeEmptyEnum(s);
-    } else if (style == EnumStyle.intConstants) {
+    } else if (effectiveStyle == EnumStyle.intConstants) {
       s.write('sealed class $name {\n');
       _writeIntegerConstants(s);
       s.write('}\n\n');
@@ -241,7 +256,7 @@ class EnumClass extends BindingType with HasLocalScope {
 
   @override
   String getDartType(Context context) {
-    if (style == EnumStyle.intConstants) {
+    if (effectiveStyle == EnumStyle.intConstants) {
       return nativeType.getDartType(context);
     } else if (isObjCImport) {
       return '${context.libs.prefix(objcPkgImport)}.$name';
@@ -258,7 +273,7 @@ class EnumClass extends BindingType with HasLocalScope {
   bool get sameFfiDartAndCType => nativeType.sameFfiDartAndCType;
 
   @override
-  bool get sameDartAndFfiDartType => style == EnumStyle.intConstants;
+  bool get sameDartAndFfiDartType => effectiveStyle == EnumStyle.intConstants;
 
   @override
   String? getDefaultValue(Context context) => '0';
@@ -300,8 +315,8 @@ class EnumConstant extends AstNode {
   final String? dartDoc;
   final int value;
 
-  final Symbol _symbol;
-  String get name => _symbol.name;
+  final Symbol symbol;
+  String get name => symbol.name;
 
   EnumConstant({
     String? originalName,
@@ -309,11 +324,11 @@ class EnumConstant extends AstNode {
     required this.value,
     this.dartDoc,
   }) : originalName = originalName ?? name,
-       _symbol = Symbol(name, SymbolKind.field);
+       symbol = Symbol(name, SymbolKind.field);
 
   @override
   void visitChildren(Visitor visitor) {
     super.visitChildren(visitor);
-    visitor.visit(_symbol);
+    visitor.visit(symbol);
   }
 }

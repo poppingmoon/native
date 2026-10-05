@@ -646,6 +646,7 @@ class NativeAssetsBuildRunner {
       'LIBCLANG_PATH', // Needed for Rust's bindgen + clang-sys.
       'LOCALAPPDATA', // Needed for dart_data_home and pub.
       'PATH', // Needed to invoke native tools.
+      'PATHEXT', // Needed to resolve executable file extensions on Windows.
       'PROGRAMDATA', // Needed for vswhere.exe.
       'PROCESSOR_ARCHITECTURE', // Needed for CMake Android on Windows.
       'SYSTEMDRIVE', // Needed for CMake.
@@ -659,10 +660,12 @@ class NativeAssetsBuildRunner {
     };
 
     const variablePrefixesFilter = {
+      'CARGO_', // Needed for the Rust package manager.
       'CCACHE_', // Needed for Ccache.
       'DOTNET_', // Needed for .Net.
       'NIX_', // Needed for Nix-installed toolchains.
       'NUGET_', // Needed for NuGet.
+      'RUSTUP_', // Needed for the Rust toolchain installer.
       'CONAN_', // Needed for Conan Package Manager.
     };
 
@@ -834,8 +837,11 @@ class NativeAssetsBuildRunner {
     '_compileHookForPackageCached',
     arguments: {'scriptUri': scriptUri.toFilePath(), 'package': packageName},
     () async {
-      // Don't invalidate cache with environment changes.
-      final environmentForCaching = <String, String>{};
+      final environmentForCaching = <String, String>{
+        // Don't invalidate cache with environment changes.
+        // If the Dart version changed, recompile.
+        'DART_VERSION': Platform.version,
+      };
       final kernelFile = _fileSystem.file(buildDirUri.resolve('hook.dill'));
       final depFile = _fileSystem.file(buildDirUri.resolve('hook.dill.d'));
       final dependenciesHashFile = buildDirUri.resolve(
@@ -883,8 +889,6 @@ class NativeAssetsBuildRunner {
             (e) => e != packageLayout.packageConfigUri && !_isImmutable(e),
           ),
           packageLayout.packageConfigUri,
-          // If the Dart version changed, recompile.
-          dartExecutable.resolve('../version'),
         ],
         lastModifiedCutoffTime,
         environmentForCaching,

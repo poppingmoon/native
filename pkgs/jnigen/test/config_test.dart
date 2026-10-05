@@ -17,65 +17,60 @@ final jacksonCoreTests = absolute(packageTests, 'jackson_core_test');
 final thirdParty = absolute(jacksonCoreTests, 'third_party');
 final testLib = absolute(thirdParty, 'test_', 'bindings');
 
-/// Compares 2 [Config] objects using [expect] to give useful errors when
+/// Compares 2 [JniGenerator] objects using [expect] to give useful errors when
 /// two fields are not equal.
-void expectConfigsAreEqual(Config a, Config b) {
-  expect(a.classes, equals(b.classes), reason: 'classes');
-  expect(a.outputConfig.dartConfig.path, equals(b.outputConfig.dartConfig.path),
-      reason: 'dartRoot');
-  expect(a.outputConfig.symbolsConfig?.path,
-      equals(b.outputConfig.symbolsConfig?.path),
+void expectConfigsAreEqual(JniGenerator a, JniGenerator b) {
+  expect(a.input.classes, equals(b.input.classes), reason: 'classes');
+  expect(a.output.dart.path, equals(b.output.dart.path), reason: 'dartRoot');
+  expect(a.output.symbols?.path, equals(b.output.symbols?.path),
       reason: 'symbolsRoot');
-  expect(a.sourcePath, equals(b.sourcePath), reason: 'sourcePath');
-  expect(a.experiments, equals(b.experiments), reason: 'experiments');
-  expect(a.classPath, equals(b.classPath), reason: 'classPath');
-  expect(a.preamble, equals(b.preamble), reason: 'preamble');
-  final am = a.mavenDownloads;
-  final bm = b.mavenDownloads;
+  expect(a.input.sourcePath, equals(b.input.sourcePath), reason: 'sourcePath');
+  expect(a.input.classPath, equals(b.input.classPath), reason: 'classPath');
+  expect(a.output.preamble, equals(b.output.preamble), reason: 'preamble');
+  final am = a.input.mavenDownloads;
+  final bm = b.input.mavenDownloads;
   if (am != null) {
     expect(bm, isNotNull);
     expect(am.sourceDeps, bm!.sourceDeps, reason: 'mavenDownloads.sourceDeps');
-    expect(path.equals(am.sourceDir, bm.sourceDir), isTrue,
+    expect(path.equals(am.sourceDir.toFilePath(), bm.sourceDir.toFilePath()),
+        isTrue,
         reason: 'mavenDownloads.sourceDir');
     expect(am.jarOnlyDeps, bm.jarOnlyDeps,
         reason: 'mavenDownloads.jarOnlyDeps');
-    expect(path.equals(am.jarDir, bm.jarDir), isTrue,
+    expect(path.equals(am.jarDir.toFilePath(), bm.jarDir.toFilePath()), isTrue,
         reason: 'mavenDownloads.jarDir');
   } else {
     expect(bm, isNull, reason: 'mavenDownloads');
   }
-  final aa = a.androidSdkConfig;
-  final ba = b.androidSdkConfig;
+  final aa = a.input.androidSdk;
+  final ba = b.input.androidSdk;
   if (aa != null) {
-    expect(ba, isNotNull, reason: 'androidSdkConfig');
-    expect(aa.versions, ba!.versions, reason: 'androidSdkConfig.versions');
-    expect(aa.sdkRoot, ba.sdkRoot, reason: 'androidSdkConfig.sdkRoot');
+    expect(ba, isNotNull);
+    expect(aa.versions, ba!.versions, reason: 'androidSdk.versions');
+    expect(aa.sdkRoot, ba.sdkRoot, reason: 'androidSdk.sdkRoot');
   } else {
-    expect(ba, isNull, reason: 'androidSdkConfig');
+    expect(ba, isNull, reason: 'androidSdk');
   }
-  final aso = a.summarizerOptions;
-  final bso = b.summarizerOptions;
-  if (aso != null) {
-    expect(bso, isNotNull, reason: 'summarizerOptions');
-    expect(aso.extraArgs, bso!.extraArgs,
-        reason: 'summarizerOptions.extraArgs');
-    expect(aso.workingDirectory, bso.workingDirectory,
-        reason: 'summarizerOptions.workingDirectory');
-    expect(aso.backend, bso.backend, reason: 'summarizerOptions.backend');
-  } else {
-    expect(bso, isNull, reason: 'summarizerOptions');
-  }
+  expect(a.input.extraArgs, b.input.extraArgs, reason: 'extraArgs');
+  expect(a.input.workingDirectory, b.input.workingDirectory,
+      reason: 'workingDirectory');
+  expect(a.input.backend, b.input.backend, reason: 'backend');
+  expect(a.input.summarizerCommand, equals(b.input.summarizerCommand),
+      reason: 'summarizerCommand');
+  expect(a.imports.symbolFiles, b.imports.symbolFiles,
+      reason: 'imports.symbolFiles');
+  expect(a.imports.hide, b.imports.hide, reason: 'imports.hide');
 }
 
 final jnigenYaml = join(jacksonCoreTests, 'jnigen.yaml');
 
-Config parseYamlConfig({List<String> overrides = const []}) =>
-    Config.parseArgs(['--config', jnigenYaml, ...overrides]);
+JniGenerator parseYamlConfig({List<String> overrides = const []}) =>
+    JniGenerator.parseArgs(['--config', jnigenYaml, ...overrides]);
 
 void testForErrorChecking<T extends Exception>(
     {required String name,
     required List<String> overrides,
-    dynamic Function(Config)? function}) {
+    dynamic Function(JniGenerator)? function}) {
   test(name, () {
     expect(
       () {
@@ -91,7 +86,7 @@ void testForErrorChecking<T extends Exception>(
 
 void main() async {
   await checkLocallyBuiltDependencies();
-  final config = Config.parseArgs([
+  final config = JniGenerator.parseArgs([
     '--config',
     jnigenYaml,
     '-Doutput.dart.path=$testLib${Platform.pathSeparator}',
@@ -123,5 +118,27 @@ void main() async {
       name: 'Nested class specified',
       overrides: ['-Dclasses=com.android.Clock\$Clock'],
     );
+
+    test('Empty classes entry from YAML', () {
+      final dir = Directory.systemTemp.createTempSync('jnigen_config_test');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final yaml = File(join(dir.path, 'jnigen.yaml'))..writeAsStringSync('''
+output:
+  dart:
+    path: lib/gen.dart
+    structure: single_file
+classes:
+  - "com.example.Foo"
+  -
+''');
+      expect(
+        () => JniGenerator.parseArgs(['--config', yaml.path]),
+        throwsA(isA<ConfigException>().having(
+          (error) => error.message,
+          'message',
+          'Class names cannot be empty.',
+        )),
+      );
+    });
   });
 }

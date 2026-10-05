@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import '../config_provider/public_ast.dart' as public_ast;
 import '../visitor/ast.dart';
 import 'binding.dart';
 import 'binding_string.dart';
@@ -21,16 +22,22 @@ import 'writer.dart';
 /// int a;
 /// ```
 /// The generated dart code is -
+/// <!-- no-source-file -->
 /// ```dart
 /// final int a = _dylib.lookup<ffi.Int32>('a').value;
 /// ```
 class Global extends LookUpBinding with HasLocalScope {
   final Type type;
-  final bool exposeSymbolAddress;
+  bool exposeSymbolAddress;
   final bool constant;
+  final ConstantValue? constantValue;
 
   @override
   final bool loadFromNativeAsset;
+
+  bool isIncluded = false;
+
+  bool get isConst => constantValue != null && !exposeSymbolAddress;
 
   Global({
     super.usr,
@@ -40,14 +47,28 @@ class Global extends LookUpBinding with HasLocalScope {
     super.dartDoc,
     this.exposeSymbolAddress = false,
     this.constant = false,
+    this.constantValue,
     this.loadFromNativeAsset = false,
   }) : super(symbol: Symbol(name, SymbolKind.field));
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.Global(this);
 
   @override
   BindingString toBindingString(Writer w) {
     final s = StringBuffer();
     final globalVarName = name;
     s.write(makeDartDoc(dartDoc));
+    if (isConst) {
+      s.write(
+        'const ${constantValue!.type} $globalVarName = '
+        '${constantValue!.value};\n\n',
+      );
+      return BindingString(
+        type: BindingStringType.global,
+        string: s.toString(),
+      );
+    }
     final context = w.context;
     final dartType = type.getDartType(context);
     final ffiDartType = type.getFfiDartType(context);
@@ -167,6 +188,7 @@ class Global extends LookUpBinding with HasLocalScope {
   @override
   void visitChildren(Visitor visitor) {
     super.visitChildren(visitor);
+    if (isConst) return;
     visitor.visit(type);
     visitor.visit(ffiImport);
     if (loadFromNativeAsset && exposeSymbolAddress) {
@@ -176,4 +198,12 @@ class Global extends LookUpBinding with HasLocalScope {
 
   @override
   void visit(Visitation visitation) => visitation.visitGlobal(this);
+}
+
+/// A constant value for a [Global].
+class ConstantValue {
+  final String type;
+  final String value;
+
+  const ConstantValue({required this.type, required this.value});
 }

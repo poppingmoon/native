@@ -36,7 +36,6 @@ class Library {
     generateForPackageObjectiveC:
         // ignore: deprecated_member_use_from_same_package
         context.config.objectiveC?.generateForPackageObjectiveC ?? false,
-    silenceEnumWarning: context.config.enums.silenceWarning,
     nativeEntryPoints: context.config.input.entryPoints
         .map((uri) => uri.toFilePath())
         .toList(),
@@ -46,15 +45,15 @@ class Library {
   factory Library({
     String? description,
     required List<Binding> bindings,
-    String? header,
+    String header = '',
     bool generateForPackageObjectiveC = false,
-    bool silenceEnumWarning = false,
     List<String> nativeEntryPoints = const <String>[],
     required Context context,
   }) {
     // Seperate bindings which require lookup.
     final lookupBindings = <LookUpBinding>[];
     final nativeBindings = <LookUpBinding>[];
+    final noLookUpBindings = <Binding>[];
     String? nativeAssetId;
 
     final outputStyle = context.config.output.style;
@@ -62,15 +61,19 @@ class Library {
         ? outputStyle.assetId
         : null;
 
-    for (final binding in bindings.whereType<LookUpBinding>()) {
-      final loadFromNativeAsset = binding.loadFromNativeAsset;
+    for (final binding in bindings) {
+      // All LookUpBindings are look-up bindings, except const Globals.
+      if (binding is LookUpBinding && !(binding is Global && binding.isConst)) {
+        final loadFromNativeAsset = binding.loadFromNativeAsset;
 
-      // At the moment, all bindings share their native config.
-      if (loadFromNativeAsset) nativeAssetId = outputStyleAssetId;
+        // At the moment, all bindings share their native config.
+        if (loadFromNativeAsset) nativeAssetId = outputStyleAssetId;
 
-      (loadFromNativeAsset ? nativeBindings : lookupBindings).add(binding);
+        (loadFromNativeAsset ? nativeBindings : lookupBindings).add(binding);
+      } else {
+        noLookUpBindings.add(binding);
+      }
     }
-    final noLookUpBindings = bindings.whereType<NoLookUpBinding>().toList();
     final hasNoLookupNativeHelper = noLookUpBindings.any(
       (b) => b.hasNativeHelperFunctions,
     );
@@ -86,7 +89,6 @@ class Library {
       classDocComment: description,
       header: header,
       generateForPackageObjectiveC: generateForPackageObjectiveC,
-      silenceEnumWarning: silenceEnumWarning,
       nativeEntryPoints: nativeEntryPoints,
       context: context,
     );
@@ -98,11 +100,11 @@ class Library {
   ///
   /// If format is true(default), the formatter will be called to format the
   /// generated file.
-  void generateFile(File file, {bool format = true}) {
+  Future<void> generateFile(File file, {bool format = true}) async {
     if (!file.existsSync()) file.createSync(recursive: true);
     file.writeAsStringSync(generate());
     if (format) {
-      final result = Process.runSync(dartExecutable, [
+      final result = await Process.run(dartExecutable, [
         'format',
         file.absolute.path,
       ], workingDirectory: file.parent.absolute.path);
@@ -117,9 +119,12 @@ class Library {
   /// Generates [file] with the Objective C code needed for the bindings, if
   /// any.
   ///
+  /// Any relative path `#include` statements are written relative to
+  /// [headerPath], or [file] if it isn't provided.
+  ///
   /// Returns whether bindings were generated.
-  bool generateObjCFile(File file) {
-    final objCString = writer.generateObjC(file.path);
+  bool generateObjCFile(File file, {String? headerPath}) {
+    final objCString = writer.generateObjC(headerPath ?? file.path);
 
     if (objCString == null) {
       // No ObjC code needed. If there's already a file (eg from an earlier
@@ -135,9 +140,12 @@ class Library {
 
   /// Generates [file] with the Cpp glue code needed for the bindings, if any.
   ///
+  /// Any relative path `#include` statements are written relative to
+  /// [headerPath], or [file] if it isn't provided.
+  ///
   /// Returns whether bindings were generated.
-  bool generateCppFile(File file) {
-    final cppString = writer.generateCpp(file.path);
+  bool generateCppFile(File file, {String? headerPath}) {
+    final cppString = writer.generateCpp(headerPath ?? file.path);
 
     if (cppString == null) {
       // No C++ glue needed. If there's already a file (eg from an earlier
@@ -155,7 +163,10 @@ class Library {
   /// bindings, if any.
   ///
   /// Returns whether bindings were generated.
-  bool generateRecordUseMappingFile(File file, {bool format = true}) {
+  Future<bool> generateRecordUseMappingFile(
+    File file, {
+    bool format = true,
+  }) async {
     final mappingString = writer.generateRecordUseMapping();
 
     if (mappingString == null) {
@@ -167,7 +178,7 @@ class Library {
     file.writeAsStringSync(mappingString);
 
     if (format) {
-      final result = Process.runSync(dartExecutable, [
+      final result = await Process.run(dartExecutable, [
         'format',
         file.absolute.path,
       ], workingDirectory: file.parent.absolute.path);

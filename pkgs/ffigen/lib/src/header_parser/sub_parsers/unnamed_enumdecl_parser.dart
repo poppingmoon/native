@@ -3,16 +3,18 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../../code_generator.dart';
-import '../../config_provider/config_types.dart';
 import '../../context.dart';
 import '../clang_bindings/clang_bindings.dart' as clang_types;
 import '../utils.dart';
 import 'api_availability.dart';
 
 /// Saves unnamed enums.
-List<Constant> saveUnNamedEnum(Context context, clang_types.CXCursor cursor) {
+List<UnnamedEnumConstant> saveUnNamedEnum(
+  Context context,
+  clang_types.CXCursor cursor,
+) {
   final logger = context.logger;
-  final addedConstants = <Constant>[];
+  final addedConstants = <UnnamedEnumConstant>[];
   cursor.visitChildren((child) {
     try {
       logger.finest(
@@ -41,12 +43,11 @@ List<Constant> saveUnNamedEnum(Context context, clang_types.CXCursor cursor) {
 }
 
 /// Adds the parameter to func in functiondecl_parser.dart.
-Constant? _addUnNamedEnumConstant(
+UnnamedEnumConstant? _addUnNamedEnumConstant(
   Context context,
   clang_types.CXCursor cursor,
 ) {
   final logger = context.logger;
-  final config = context.config;
   final bindingsIndex = context.bindingsIndex;
 
   final usr = cursor.usr();
@@ -68,9 +69,7 @@ Constant? _addUnNamedEnumConstant(
   final constant = UnnamedEnumConstant(
     usr: usr,
     originalName: cursor.spelling(),
-    name: config.unnamedEnums.rename(
-      Declaration(usr: cursor.usr(), originalName: cursor.spelling()),
-    ),
+    name: cursor.spelling(),
     dartDoc: apiAvailability.dartDoc,
     rawType: 'int',
     rawValue: clang.clang_getEnumConstantDeclValue(cursor).toString(),

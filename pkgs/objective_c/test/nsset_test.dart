@@ -28,12 +28,12 @@ void main() {
       expect(s.contains(obj3), isTrue);
       expect(s.contains(NSObject()), isFalse);
       expect((s as Set).contains(123), isFalse);
-      expect(s.contains(null), isFalse);
+      expect(s.contains(null as Object?), isFalse);
 
       expect(s.lookup(obj3), obj3);
       expect(s.lookup(NSObject()), null);
       expect((s as Set).lookup(123), null);
-      expect(s.lookup(null), null);
+      expect(s.lookup(null as Object?), null);
 
       final actual = <ObjCObject>[];
       for (final value in s) {
@@ -120,6 +120,20 @@ void main() {
         for (final t in trackers) {
           expect(t.isAlive, false);
         }
+      });
+    });
+
+    test('`NSSet.of` garbage collected', () async {
+      await using((arena) async {
+        final tracker = ReferenceTracker(arena);
+        () {
+          tracker.track(NSSet.of([NSObject(), NSObject()]));
+        }();
+
+        doGC();
+        await Future<void>.delayed(Duration.zero);
+        doGC();
+        expect(tracker.isAlive, isFalse);
       });
     });
   });

@@ -22,14 +22,13 @@ class Linker extends Visitor<Classes, Future<void>> with TopLevelVisitor {
 
   Linker(this.config);
 
-  final Config config;
+  final JniGenerator config;
 
   @override
   Future<void> visit(Classes node) async {
     void assignPath(ClassDecl decl) {
-      final root = config.outputConfig.dartConfig.path;
-      if (config.outputConfig.dartConfig.structure ==
-          OutputStructure.singleFile) {
+      final root = config.output.dart.path;
+      if (config.output.dart.structure == OutputStructure.singleFile) {
         decl.path = root.toFilePath();
       } else {
         final dollarSign = decl.binaryName.indexOf('\$');
@@ -68,7 +67,7 @@ class Linker extends Visitor<Classes, Future<void>> with TopLevelVisitor {
             config.importedClasses[binaryName] ?? node.decls[binaryName];
         if (decl != null) return decl;
 
-        if (config.generateStubs) {
+        if (config.output.generateStubs) {
           log.fine('Class $binaryName not found. Creating a stub.');
           // Create a synthetic stub. Mark it excluded for now. StubCollector
           // will mark it as a stub later.
@@ -105,7 +104,7 @@ class Linker extends Visitor<Classes, Future<void>> with TopLevelVisitor {
 }
 
 class _ClassLinker extends Visitor<ClassDecl, void> {
-  final Config config;
+  final JniGenerator config;
   final _Resolver resolve;
   final Set<ClassDecl> linked;
 
@@ -194,7 +193,7 @@ class _MethodLinker extends Visitor<Method, void> {
   _MethodLinker(this.config, this.resolve, this.typeVarOrigin)
       : typeLinker = _TypeLinker(resolve, typeVarOrigin);
 
-  final Config config;
+  final JniGenerator config;
   final _Resolver resolve;
   final Map<String, TypeParam> typeVarOrigin;
   final _TypeLinker typeLinker;

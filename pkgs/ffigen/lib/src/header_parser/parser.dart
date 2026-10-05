@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:logging/logging.dart';
@@ -18,7 +17,10 @@ import '../strings.dart' as strings;
 import '../visitor/apply_config_filters.dart';
 import '../visitor/ast.dart';
 import '../visitor/copy_methods_from_super_type.dart';
+import '../visitor/copy_typealias_docs.dart';
 import '../visitor/create_scopes.dart';
+import '../visitor/default_param_names.dart';
+import '../visitor/expand_varargs.dart';
 import '../visitor/fill_method_dependencies.dart';
 import '../visitor/find_symbols.dart';
 import '../visitor/find_transitive_deps.dart';
@@ -31,6 +33,15 @@ import 'clang_bindings/clang_bindings.dart' as clang_types;
 import 'sub_parsers/macro_parser.dart';
 import 'translation_unit_parser.dart';
 import 'utils.dart';
+
+/// Exception thrown when header parsing fails due to source errors.
+class HeaderParserException implements Exception {
+  final String message;
+  HeaderParserException(this.message);
+
+  @override
+  String toString() => 'HeaderParserException: $message';
+}
 
 /// Main entrypoint for header_parser.
 Library parse(Context context) => Library.fromContext(
@@ -76,86 +87,95 @@ List<Binding> parseToBindings(Context context) {
 
   final tuList = <Pointer<clang_types.CXTranslationUnitImpl>>[];
 
-  // Parse all translation units from entry points.
-  for (final headerLocationUri in config.input.entryPoints) {
-    final headerLocation = headerLocationUri.toFilePath();
-    context.logger.fine('Creating TranslationUnit for header: $headerLocation');
-
-    final tu = clang.clang_parseTranslationUnit(
-      index,
-      headerLocation.toNativeUtf8().cast(),
-      clangCmdArgs.cast(),
-      cmdLen,
-      nullptr,
-      0,
-      clang_types.CXTranslationUnit_Flags.CXTranslationUnit_SkipFunctionBodies |
-          clang_types
-              .CXTranslationUnit_Flags
-              .CXTranslationUnit_DetailedPreprocessingRecord |
-          clang_types
-              .CXTranslationUnit_Flags
-              .CXTranslationUnit_IncludeAttributedTypes,
-    );
-
-    if (tu == nullptr) {
-      context.logger.severe(
-        "Skipped header/file: $headerLocation, couldn't parse source.",
+  try {
+    // Parse all translation units from entry points.
+    for (final headerLocationUri in config.input.entryPoints) {
+      final headerLocation = headerLocationUri.toFilePath();
+      context.logger.fine(
+        'Creating TranslationUnit for header: $headerLocation',
       );
-      // Skip parsing this header.
-      continue;
+
+      final tu = clang.clang_parseTranslationUnit(
+        index,
+        headerLocation.toNativeUtf8().cast(),
+        clangCmdArgs.cast(),
+        cmdLen,
+        nullptr,
+        0,
+        clang_types
+                .CXTranslationUnit_Flags
+                .CXTranslationUnit_SkipFunctionBodies |
+            clang_types
+                .CXTranslationUnit_Flags
+                .CXTranslationUnit_DetailedPreprocessingRecord |
+            clang_types
+                .CXTranslationUnit_Flags
+                .CXTranslationUnit_IncludeAttributedTypes,
+      );
+
+      if (tu == nullptr) {
+        context.logger.severe(
+          "Skipped header/file: $headerLocation, couldn't parse source.",
+        );
+        // Skip parsing this header.
+        continue;
+      }
+
+      logTuDiagnostics(tu, context, headerLocation);
+      tuList.add(tu);
     }
 
-    logTuDiagnostics(tu, context, headerLocation);
-    tuList.add(tu);
-  }
-
-  if (context.hasSourceErrors) {
-    context.logger.warning(
-      'The compiler found warnings/errors in source files.',
-    );
-    context.logger.warning('This will likely generate invalid bindings.');
-    if (config.input.ignoreSourceErrors) {
+    if (context.hasSourceErrors) {
       context.logger.warning(
-        'Ignored source errors. (User supplied --ignore-source-errors)',
+        'The compiler found warnings/errors in source files.',
       );
-    } else if (config.objectiveC != null) {
-      context.logger.warning('Ignored source errors. (ObjC)');
-    } else {
-      context.logger.severe(
-        'Skipped generating bindings due to errors in source files. See https://github.com/dart-lang/native/blob/main/pkgs/ffigen/doc/errors.md.',
-      );
-      exit(1);
+      context.logger.warning('This will likely generate invalid bindings.');
+      if (config.input.ignoreSourceErrors) {
+        context.logger.warning(
+          'Ignored source errors. (User supplied --ignore-source-errors)',
+        );
+      } else if (config.objectiveC != null) {
+        context.logger.warning('Ignored source errors. (ObjC)');
+      } else {
+        context.logger.severe(
+          'Skipped generating bindings due to errors in source files. See https://github.com/dart-lang/native/blob/main/pkgs/ffigen/doc/errors.md.',
+        );
+        throw HeaderParserException(
+          'Skipped generating bindings due to errors in source files.',
+        );
+      }
     }
+
+    final tuCursors = tuList.map(
+      (tu) => clang.clang_getTranslationUnitCursor(tu),
+    );
+
+    // Build usr to CXCusror map from translation units.
+    for (final rootCursor in tuCursors) {
+      buildUsrCursorDefinitionMap(context, rootCursor);
+    }
+
+    // Parse definitions from translation units.
+    for (final rootCursor in tuCursors) {
+      bindings.addAll(parseTranslationUnit(context, rootCursor));
+    }
+
+    // Add all saved unnamed enums.
+    bindings.addAll(context.unnamedEnumConstants);
+
+    // Parse all saved macros.
+    bindings.addAll(parseSavedMacros(context));
+
+    return bindings.toList();
+  } finally {
+    // Dispose translation units.
+    for (final tu in tuList) {
+      clang.clang_disposeTranslationUnit(tu);
+    }
+
+    clangCmdArgs.dispose(cmdLen);
+    clang.clang_disposeIndex(index);
   }
-
-  final tuCursors = tuList.map(
-    (tu) => clang.clang_getTranslationUnitCursor(tu),
-  );
-
-  // Build usr to CXCusror map from translation units.
-  for (final rootCursor in tuCursors) {
-    buildUsrCursorDefinitionMap(context, rootCursor);
-  }
-
-  // Parse definitions from translation units.
-  for (final rootCursor in tuCursors) {
-    bindings.addAll(parseTranslationUnit(context, rootCursor));
-  }
-
-  // Dispose translation units.
-  for (final tu in tuList) {
-    clang.clang_disposeTranslationUnit(tu);
-  }
-
-  // Add all saved unnamed enums.
-  bindings.addAll(context.unnamedEnumConstants);
-
-  // Parse all saved macros.
-  bindings.addAll(parseSavedMacros(context));
-
-  clangCmdArgs.dispose(cmdLen);
-  clang.clang_disposeIndex(index);
-  return bindings.toList();
 }
 
 List<String> _findObjectiveCSysroot() => [
@@ -167,14 +187,30 @@ List<String> _findObjectiveCSysroot() => [
 List<Binding> transformBindings(List<Binding> rawBindings, Context context) {
   final config = context.config;
 
-  final allBindings = visit(
+  final almostAllBindings = visit(
     context,
-    FindTransitiveDepsVisitation(),
+    FindTransitiveDepsVisitation(rawBindings),
     rawBindings,
   ).transitives;
 
-  visit(context, CopyMethodsFromSuperTypesVisitation(), allBindings);
-  visit(context, FixOverriddenMethodsVisitation(context), allBindings);
+  visit(context, CopyTypealiasDocsVisitation(), almostAllBindings);
+  visit(context, CopyMethodsFromSuperTypesVisitation(), almostAllBindings);
+  visit(context, FixOverriddenMethodsVisitation(context), almostAllBindings);
+
+  final publicNodes = almostAllBindings
+      .where((b) => !b.isInternal)
+      .map((b) => b.toPublicAstNode())
+      .nonNulls
+      .toList();
+  for (final visitor in config.visitors) {
+    visitor.visitAll(publicNodes);
+  }
+
+  final allBindings = visit(
+    context,
+    ExpandVarargsVisitation(config, almostAllBindings),
+    almostAllBindings,
+  ).bindings;
 
   final applyConfigFiltersVisitation = ApplyConfigFiltersVisitation(context);
   visit(context, applyConfigFiltersVisitation, allBindings);
@@ -190,13 +226,13 @@ List<Binding> transformBindings(List<Binding> rawBindings, Context context) {
   ).byValueCompounds;
   visit(
     context,
-    ClearOpaqueCompoundMembersVisitation(config, byValueCompounds, included),
+    ClearOpaqueCompoundMembersVisitation(byValueCompounds, included),
     allBindings,
   );
 
   final transitives = visit(
     context,
-    FindTransitiveDepsVisitation(),
+    FindTransitiveDepsVisitation(included),
     included,
   ).transitives;
   final directTransitives = visit(
@@ -218,6 +254,7 @@ List<Binding> transformBindings(List<Binding> rawBindings, Context context) {
   visit(context, MarkBindingsVisitation(finalBindings), allBindings);
   visit(context, MarkImportsVisitation(context), finalBindings);
 
+  visit(context, DefaultParameterNamesVisitation(), finalBindings);
   _nameAllSymbols(context, finalBindings);
 
   /// Sort bindings.
@@ -230,17 +267,6 @@ List<Binding> transformBindings(List<Binding> rawBindings, Context context) {
   /// Handle any declaration-declaration name conflicts and emit warnings.
   for (final b in finalBindingsList) {
     _warnIfPrivateDeclaration(b, context.logger);
-  }
-
-  // Override pack values according to config. We do this after declaration
-  // conflicts have been handled so that users can target the generated names.
-  for (final b in finalBindingsList) {
-    if (b is Struct) {
-      final pack = config.structs.packingOverride(b);
-      if (pack != null) {
-        b.pack = pack.value;
-      }
-    }
   }
 
   // Check that all ObjCMethods have their parent set correctly.
@@ -287,6 +313,7 @@ void _nameAllSymbols(Context context, Set<Binding> bindings) {
 
   context.rootScope.fillNames();
   context.rootObjCScope.fillNames();
+  context.rootCppScope.fillNames();
 }
 
 ExtraSymbols _createExtraSymbols(Context context) {

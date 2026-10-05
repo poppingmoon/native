@@ -26,8 +26,16 @@ class FillMethodDependenciesVisitation extends Visitation {
   }
 
   @override
+  void visitFunc(Func node) {
+    if (!finalBindings.contains(node)) return;
+    node.fillFuncVarSymbol();
+    _adder.visit(node.fillExposedFunctionTypealias());
+  }
+
+  @override
   void visitObjCInterface(ObjCInterface node) {
     if (!finalBindings.contains(node)) return;
+    node.fillClassObject();
 
     if (!node.generateAsStub) {
       node.visitChildren(visitor);
@@ -41,6 +49,11 @@ class FillMethodDependenciesVisitation extends Visitation {
   @override
   void visitObjCCategory(ObjCCategory node) {
     if (!finalBindings.contains(node)) return;
+
+    if (!node.parent.generateAsStub) {
+      node.parent.fillClassObject();
+      _adder.visit(node.classObject);
+    }
     node.visitChildren(visitor);
 
     for (final method in node.methods) {
@@ -51,9 +64,11 @@ class FillMethodDependenciesVisitation extends Visitation {
   @override
   void visitObjCProtocol(ObjCProtocol node) {
     if (!finalBindings.contains(node)) return;
+    node.fillProtocolPointer();
 
     if (!node.generateAsStub) {
       node.visitChildren(visitor);
+      _adder.visit(node.protocolPointer);
       for (final method in node.methods) {
         final blk = method.fillProtocolBlock();
         _adder.visit(blk);
@@ -101,6 +116,7 @@ class _MethodDepAdderVisitation extends Visitation {
 
   @override
   void visitObjCInterface(ObjCInterface node) {
+    node.fillClassObject();
     if (node.isInternal) {
       finalBindings.add(node);
       node.visitChildren(visitor);
@@ -108,7 +124,17 @@ class _MethodDepAdderVisitation extends Visitation {
   }
 
   @override
-  void visitFunc(Func node) => finalBindings.add(node);
+  void visitFunc(Func node) {
+    node.fillFuncVarSymbol();
+    visitor.visit(node.fillExposedFunctionTypealias());
+    finalBindings.add(node);
+  }
+
+  @override
+  void visitObjCProtocol(ObjCProtocol node) {
+    node.fillProtocolPointer();
+    finalBindings.add(node);
+  }
 
   @override
   void visitObjCProtocolMethodTrampoline(ObjCProtocolMethodTrampoline node) =>

@@ -1,4 +1,19 @@
-## 1.6.2-wip
+## 2.0.0-wip
+
+- **Breaking change**: Remove `KernelAssets` (and related `KernelAsset*`
+  classes) and `Target`.
+- Drop regular dependency on `package:code_assets`.
+
+## 1.6.4
+
+- Use the path separator of the target platform in native_assets.yaml.
+- Bump `package:code_assets` dependency to `^2.1.0`.
+
+## 1.6.3
+
+- Invalidate cached hook compilations when the Dart SDK version changes.
+
+## 1.6.2
 
 - Provide the runner's logger to protocol extensions before any other method is
   invoked, so they can emit validation diagnostics.
@@ -6,6 +21,11 @@
   file extension
 - Report a format error instead of throwing a `TypeError` when a hook's cached
   `output.json` contains valid JSON that is not an object.
+- Bump `package:code_assets` dependency to `^2.0.0`.
+- Add `PATHEXT` to the environment variables allowlist.
+- Add prefixes `RUSTUP_` and `CARGO_` to the environment variables allowlist.
+- Store size and last modification time in dependency hashes to skip content
+  hashing when unchanged.
 
 ## 1.6.1
 

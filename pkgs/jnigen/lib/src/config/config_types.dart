@@ -14,7 +14,6 @@ import '../elements/j_elements.dart' as j_ast;
 import '../logging/logging.dart';
 import '../util/find_package.dart';
 import 'config_exception.dart';
-import 'experiments.dart';
 import 'yaml_reader.dart';
 
 /// Modify this when symbols file format changes according to pub_semver.
@@ -22,29 +21,62 @@ final _currentVersion = Version(1, 0, 0);
 
 /// Configuration for dependencies to be downloaded using maven.
 ///
-/// Dependency names should be listed in groupId:artifactId:version format.
+/// Dependency names should be listed in `groupId:artifactId:version` format.
 /// For [sourceDeps], sources will be unpacked to [sourceDir] root and JAR files
-/// will also be downloaded. For the packages in jarOnlyDeps, only JAR files
-/// will be downloaded.
+/// will also be downloaded. Note that downloading source packages does not
+/// automatically resolve or include transitive dependencies. For packages in
+/// [jarOnlyDeps], only JAR files will be downloaded.
 ///
-/// When passed as a parameter to [Config], the downloaded sources and
-/// JAR files will be automatically added to source path and class path
+/// When passed as a parameter to [JniGenerator], the downloaded sources and
+/// JAR files will be automatically added to the source path and class path
 /// respectively.
 class MavenDownloads {
-  static const defaultMavenSourceDir = 'mvn_java';
-  static const defaultMavenJarDir = 'mvn_jar';
+  /// Default directory for unpacking Maven sources (`mvn_java/`).
+  static final defaultMavenSourceDir = Uri.directory('mvn_java');
+
+  /// Default directory for downloading Maven JAR files (`mvn_jar/`).
+  static final defaultMavenJarDir = Uri.directory('mvn_jar');
 
   MavenDownloads({
     this.sourceDeps = const [],
     // ASK: Should this be changed to a gitignore'd directory like build ?
-    this.sourceDir = defaultMavenSourceDir,
+    Uri? sourceDir,
     this.jarOnlyDeps = const [],
-    this.jarDir = defaultMavenJarDir,
-  });
+    Uri? jarDir,
+  })  : sourceDir = sourceDir ?? defaultMavenSourceDir,
+        jarDir = jarDir ?? defaultMavenJarDir;
+
+  /// List of Maven dependencies to download and unpack sources for.
+  ///
+  /// Each entry should be a valid Maven artifact coordinate in the format
+  /// `groupId:artifactId:version`.
+  ///
+  /// Downloading source packages does not automatically resolve or include
+  /// transitive dependencies. Any required transitive dependencies must be
+  /// listed explicitly in [sourceDeps] or [jarOnlyDeps].
   List<String> sourceDeps;
-  String sourceDir;
+
+  /// Directory where Maven sources are extracted.
+  ///
+  /// Defaults to `mvn_java/`. It is not required to list this directory
+  /// explicitly in [Input.sourcePath].
+  Uri sourceDir;
+
+  /// List of Maven dependencies to download JARs for only.
+  ///
+  /// Each entry should be a valid Maven artifact coordinate in the format
+  /// `groupId:artifactId:version`.
+  ///
+  /// These can be used for JAR dependencies (including optional or transitive
+  /// dependencies of [sourceDeps]) that are needed on the classpath so the
+  /// source code can be analyzed, but do not need Dart bindings generated.
   List<String> jarOnlyDeps;
-  String jarDir;
+
+  /// Directory where Maven JARs are stored.
+  ///
+  /// Defaults to `mvn_jar/`. It is not required to list this directory
+  /// explicitly in [Input.classPath].
+  Uri jarDir;
 }
 
 /// Configuration for Android SDK sources and stub JAR files.
@@ -63,14 +95,14 @@ class MavenDownloads {
 /// specified, an attempt is made to find out SDK installation directory using
 /// environment variable `ANDROID_SDK_ROOT` if it's defined, else an error
 /// will be thrown.
-class AndroidSdkConfig {
-  AndroidSdkConfig({
+class AndroidSdk {
+  AndroidSdk({
     this.versions,
     this.sdkRoot,
     this.addGradleDeps = false,
     this.addGradleSources = false,
-    this.androidExample,
-  }) {
+    Uri? androidExample,
+  }) : androidExample = androidExample ?? Uri.directory('.') {
     if (versions != null && sdkRoot == null) {
       throw ConfigException('No SDK Root specified for finding Android SDK '
           'from version priority list $versions');
@@ -81,13 +113,20 @@ class AndroidSdkConfig {
     }
   }
 
-  /// Versions of android SDK to search for, in decreasing order of preference.
+  /// Versions of Android SDK to search for, in decreasing order of preference.
+  ///
+  /// If `null`, Android SDK platform versions are not searched directly. Note
+  /// that at least one of [versions], `addGradleDeps`, or `addGradleSources`
+  /// must be provided, otherwise a [ConfigException] is thrown.
   List<int>? versions;
 
-  /// Root of Android SDK installation, this should be normally given on
-  /// command line or by setting `ANDROID_SDK_ROOT`, since this varies from
-  /// system to system.
-  String? sdkRoot;
+  /// Root of Android SDK installation.
+  ///
+  /// If `null`, JNIgen attempts to find the SDK directory using the
+  /// `ANDROID_SDK_ROOT` environment variable. If [versions] is specified and
+  /// [sdkRoot] remains `null` (and `ANDROID_SDK_ROOT` is unset), a
+  /// [ConfigException] is thrown.
+  Uri? sdkRoot;
 
   /// Attempt to determine exact compile time dependencies by running a gradle
   /// stub in android subproject of this project.
@@ -108,11 +147,19 @@ class AndroidSdkConfig {
   /// specified.
   bool addGradleSources;
 
-  /// Relative path to example application which will be used to determine
-  /// compile time classpath using a gradle stub. For most Android plugin
-  /// packages, 'example' will be the name of example application created inside
-  /// the package.
-  String? androidExample;
+  /// Path to the Android application project (or example application) used to
+  /// determine compile-time classpath using a Gradle stub.
+  ///
+  /// In the case of an Android plugin project, the plugin itself cannot be
+  /// built directly and [addGradleDeps] is not directly feasible. This property
+  /// can be set to the path of the package's example application (usually
+  /// `example/`) so that Gradle dependencies can be collected by running a
+  /// stub in that directory.
+  ///
+  /// See `example/notification_plugin/tool/jnigen.dart` for an example.
+  ///
+  /// Defaults to the current directory (`.`).
+  Uri androidExample;
 }
 
 extension on String {
@@ -141,15 +188,6 @@ T _getEnumValueFromString<T>(
   return value;
 }
 
-/// Additional options to pass to the summary generator component.
-class SummarizerOptions {
-  SummarizerOptions(
-      {this.extraArgs = const [], this.workingDirectory, this.backend});
-  List<String> extraArgs;
-  Uri? workingDirectory;
-  SummarizerBackend? backend;
-}
-
 /// Backend for reading summary of Java libraries
 enum SummarizerBackend {
   /// Generate Java API summaries using JARs in provided `classPath`s.
@@ -159,6 +197,8 @@ enum SummarizerBackend {
   doclet,
 }
 
+/// Parses [name] into a [SummarizerBackend] enum value, or returns
+/// [defaultVal].
 SummarizerBackend? getSummarizerBackend(
   String? name,
   SummarizerBackend? defaultVal,
@@ -172,13 +212,21 @@ SummarizerBackend? getSummarizerBackend(
 
 void _ensureIsDirectory(String name, Uri path) {
   if (!path.toFilePath().endsWith(Platform.pathSeparator)) {
-    throw ConfigException('$name must be a directory path. If using YAML '
-        'config, please ensure the path ends with a slash (/).');
+    throw ConfigException('$name must be a directory path. '
+        'Please ensure the path ends with a slash (/).');
   }
 }
 
-enum OutputStructure { packageStructure, singleFile }
+/// File structure of the generated Dart bindings.
+enum OutputStructure {
+  /// Generate package structure with multiple files.
+  packageStructure,
 
+  /// Generate all Dart bindings into a single file.
+  singleFile,
+}
+
+/// Parses [name] into an [OutputStructure] enum value, or returns [defaultVal].
 OutputStructure getOutputStructure(String? name, OutputStructure defaultVal) {
   return _getEnumValueFromString(
     OutputStructure.values.valuesMap(),
@@ -187,8 +235,9 @@ OutputStructure getOutputStructure(String? name, OutputStructure defaultVal) {
   );
 }
 
-class DartCodeOutputConfig {
-  DartCodeOutputConfig({
+/// Configuration for outputting generated Dart code.
+class DartOutput {
+  DartOutput({
     required this.path,
     this.structure = OutputStructure.packageStructure,
   }) {
@@ -203,31 +252,157 @@ class DartCodeOutputConfig {
   }
 
   /// Path to write generated Dart bindings.
+  ///
+  /// When [structure] is [OutputStructure.packageStructure] (the default),
+  /// this must be a directory path ending with a trailing slash (`/`).
+  /// When [structure] is [OutputStructure.singleFile], this must be a file
+  /// path ending with `.dart`.
   Uri path;
 
   /// File structure of the generated Dart bindings.
   OutputStructure structure;
 }
 
-class SymbolsOutputConfig {
-  /// Path to write generated Dart bindings.
+/// Configuration for outputting generated symbols YAML file.
+class SymbolsOutput {
+  /// Path to write generated symbols YAML file.
   final Uri path;
 
-  SymbolsOutputConfig(this.path) {
+  SymbolsOutput(this.path) {
     if (p.extension(path.toFilePath()) != '.yaml') {
       throw ConfigException('Symbol\'s output path must end with ".yaml".');
     }
   }
 }
 
-class OutputConfig {
-  OutputConfig({
-    required this.dartConfig,
-    this.symbolsConfig,
-  });
+/// Configuration for importing symbol files (`symbols.yaml`) from other
+/// packages.
+final class SymbolImports {
+  /// Symbol file URIs (`package:...` or file paths) to import.
+  final List<Uri> symbolFiles;
 
-  DartCodeOutputConfig dartConfig;
-  SymbolsOutputConfig? symbolsConfig;
+  /// Concrete class names to hide/exclude from the imports.
+  final List<String> hide;
+
+  const SymbolImports({
+    this.symbolFiles = const [],
+    this.hide = const [],
+  });
+}
+
+/// Configuration for custom nullability annotations recognized by JNIgen.
+///
+/// In addition to custom annotations configured here, JNIgen automatically
+/// recognizes standard nullability annotations based on
+/// [Kotlin's Java interop conventions](https://kotlinlang.org/docs/java-interop.html#nullability-annotations):
+final class NullabilityAnnotations {
+  /// Fully-qualified class names of custom `@NonNull` annotations.
+  ///
+  /// These are recognized in addition to the default `@NonNull` annotations.
+  final List<String> nonNull;
+
+  /// Fully-qualified class names of custom `@Nullable` annotations.
+  ///
+  /// These are recognized in addition to the default `@Nullable` annotations.
+  final List<String> nullable;
+
+  const NullabilityAnnotations({
+    this.nonNull = const [],
+    this.nullable = const [],
+  });
+}
+
+/// Configuration for outputting generated Dart code and symbol files.
+final class Output {
+  /// Dart output configuration (path and layout structure).
+  final DartOutput dart;
+
+  /// Symbol file output configuration (`symbols.yaml`).
+  ///
+  /// If `null`, symbol file generation (`symbols.yaml`) is skipped.
+  final SymbolsOutput? symbols;
+
+  /// Common header text prepended to generated Dart files.
+  final String preamble;
+
+  /// Whether to generate stubs for unincluded dependent classes.
+  final bool generateStubs;
+
+  /// Whether to format the generated Dart code with `dart format`.
+  final bool format;
+
+  const Output({
+    required this.dart,
+    this.symbols,
+    this.preamble = '',
+    this.generateStubs = true,
+    this.format = true,
+  });
+}
+
+/// Configuration for input Java source files, classpaths, and SDK dependencies.
+final class Input {
+  /// Directories to search for Java source files.
+  ///
+  /// Note that source paths for dependencies downloaded using [mavenDownloads]
+  /// are added automatically without needing to be specified here.
+  final List<Uri> sourcePath;
+
+  /// Classpaths/JARs to search for compiled Java classes and dependencies.
+  ///
+  /// This should include any JAR dependencies of the source files in
+  /// [sourcePath]. Note that JARs downloaded using [mavenDownloads] are added
+  /// automatically without needing to be specified here.
+  final List<Uri> classPath;
+
+  /// Fully-qualified class or package names to generate bindings for.
+  List<String> classes;
+
+  /// Extra arguments passed to the summarizer tool.
+  final List<String> extraArgs;
+
+  /// Working directory for running the summarizer tool.
+  final Uri workingDirectory;
+
+  /// Backend engine used to generate summaries.
+  ///
+  /// If `null`, the summarizer tool defaults to auto-detection (preferring
+  /// `doclet` for source files and falling back to `asm` for compiled classes).
+  final SummarizerBackend? backend;
+
+  /// Configuration for downloading dependencies using Maven.
+  ///
+  /// If `null`, no dependencies are downloaded using Maven.
+  final MavenDownloads? mavenDownloads;
+
+  /// Configuration for Android SDK libraries and Gradle dependency resolution.
+  ///
+  /// If `null`, Android SDK library search and Gradle dependency resolution are
+  /// disabled.
+  final AndroidSdk? androidSdk;
+
+  /// Command used to run the API summarizer.
+  ///
+  /// This should only be used if the system uses a prebuilt `ApiSummarizer.jar`
+  /// file. If provided, building ApiSummarizer using Gradle is skipped and this
+  /// command is used directly to invoke the summarizer.
+  final String? summarizerCommand;
+
+  Input({
+    this.sourcePath = const [],
+    this.classPath = const [],
+    required this.classes,
+    this.extraArgs = const [],
+    Uri? workingDirectory,
+    this.backend,
+    this.mavenDownloads,
+    this.androidSdk,
+    this.summarizerCommand,
+  }) : workingDirectory = workingDirectory ?? Uri.directory('.') {
+    for (final className in classes) {
+      _validateClassName(className);
+    }
+  }
 }
 
 bool _isCapitalized(String s) {
@@ -236,6 +411,9 @@ bool _isCapitalized(String s) {
 }
 
 void _validateClassName(String className) {
+  if (className.isEmpty) {
+    throw ConfigException('Class names cannot be empty.');
+  }
   final parts = className.split('.');
   assert(parts.isNotEmpty);
   const nestedClassesInfo =
@@ -254,114 +432,57 @@ void _validateClassName(String className) {
 }
 
 /// Configuration for JNIgen binding generation.
-class Config {
-  Config(
-      {required this.outputConfig,
-      required this.classes,
-      this.experiments,
-      this.sourcePath,
-      this.classPath,
-      this.preamble,
-      this.customClassBody,
-      this.androidSdkConfig,
-      this.mavenDownloads,
-      this.summarizerOptions,
-      this.nonNullAnnotations,
-      this.nullableAnnotations,
-      this.logLevel = Level.INFO,
-      this.dumpJsonTo,
-      this.imports,
-      this.hide,
-      this.generateStubs = true,
-      this.visitors}) {
-    for (final className in classes) {
-      _validateClassName(className);
-    }
-  }
+///
+/// {@category Java Differences}
+/// {@category Lifecycle}
+/// {@category Threading}
+/// {@category Interface Implementation}
+/// {@category Exceptions}
+/// {@category Java Runtime Types}
+/// {@category Debugging}
+final class JniGenerator {
+  JniGenerator({
+    required this.input,
+    required this.output,
+    this.imports = const SymbolImports(),
+    this.nullability = const NullabilityAnnotations(),
+    this.visitors = const [],
+    this.customClassBody = const {},
+  });
 
-  /// Output configuration for generated bindings
-  OutputConfig outputConfig;
+  /// Input source paths, classpaths, target classes, and SDK dependencies.
+  final Input input;
 
-  /// List of classes or packages for which bindings have to be generated.
-  ///
-  /// The names must be fully qualified, and it's assumed that the directory
-  /// structure corresponds to package naming. For example, com.abc.MyClass
-  /// should be resolvable as `com/abc/MyClass.java` from one of the provided
-  /// source paths. Same applies if ASM backend is used, except that the file
-  /// name suffix is `.class`.
-  List<String> classes;
+  /// Output destination and file settings (Dart code, symbol files, preamble).
+  final Output output;
 
-  Set<Experiment?>? experiments;
+  /// External symbol file imports for cross-package type sharing.
+  final SymbolImports imports;
 
-  /// Paths to search for java source files.
-  ///
-  /// If a source package is downloaded through [mavenDownloads] option,
-  /// the corresponding source folder is automatically added and does not
-  /// need to be explicitly specified.
-  List<Uri>? sourcePath;
+  /// Custom nullability annotation configuration.
+  final NullabilityAnnotations nullability;
 
-  /// class path for scanning java libraries. If `backend` is `asm`, the
-  /// specified classpath is used to search for [classes], otherwise it's
-  /// merely used by the doclet API to find transitively referenced classes,
-  /// but not the specified classes / packages themselves.
-  List<Uri>? classPath;
-
-  /// Common text to be pasted on top of generated C and Dart files.
-  final String? preamble;
-
-  /// Configuration to search for Android SDK libraries (Experimental).
-  final AndroidSdkConfig? androidSdkConfig;
-
-  /// Configuration for auto-downloading JAR / source packages using maven,
-  /// along with their transitive dependencies.
-  final MavenDownloads? mavenDownloads;
-
-  /// Additional options for the summarizer component.
-  SummarizerOptions? summarizerOptions;
-
-  /// List of dependencies.
-  final List<Uri>? imports;
-
-  /// Hide concrete classes from the imports
-  final List<String>? hide;
-
-  /// Whether to generate stubs for excluded classes.
-  final bool generateStubs;
-
-  /// Annotations specifying that this type is nullable.
-  final List<String>? nullableAnnotations;
-
-  /// Annotations specifying that this type is non-nullable.
-  final List<String>? nonNullAnnotations;
+  /// AST visitors for filtering, renaming, and AST transformation passes.
+  final List<j_ast.Visitor> visitors;
 
   /// Custom code that is added to the end of the class body with the specified
   /// binary name.
   ///
   /// Used for testing package:jnigen.
-  final Map<String, String>? customClassBody;
-
-  // User custom visitors.
-  List<j_ast.Visitor>? visitors;
+  final Map<String, String> customClassBody;
 
   late final Map<String, ClassDecl> _importedClasses;
 
-  /// Directory containing the YAML configuration file, if any.
+  /// Directory containing the YAML configuration file.
+  ///
+  /// `null` if the configuration was not loaded from a YAML configuration file.
   Uri? get configRoot => _configRoot;
   Uri? _configRoot;
-
-  /// Log verbosity. The possible values in decreasing order of verbosity
-  /// are verbose > debug > info > warning > error.
-  ///
-  /// Defaults to [Level.INFO].
-  Level logLevel = Level.INFO;
-
-  /// File to which JSON summary is written before binding generation.
-  final String? dumpJsonTo;
 
   static final _levels = Map.fromEntries(
       Level.LEVELS.map((l) => MapEntry(l.name.toLowerCase(), l)));
 
-  static Config parseArgs(List<String> args) {
+  static JniGenerator parseArgs(List<String> args) {
     final prov = YamlReader.parseArgs(args);
 
     final missingValues = <String>[];
@@ -375,10 +496,12 @@ class Config {
       return res;
     }
 
-    String? getSdkRoot() {
-      final root = prov.getString(_Props.androidSdkRoot) ??
-          Platform.environment['ANDROID_SDK_ROOT'];
-      return root;
+    Uri? getSdkRoot() {
+      final root = prov.getPath(_Props.androidSdkRoot);
+      if (root != null) return root;
+      final envVar = Platform.environment['ANDROID_SDK_ROOT'];
+      if (envVar != null) return Uri.directory(envVar);
+      return null;
     }
 
     Level logLevelFromString(String? levelName) {
@@ -390,78 +513,86 @@ class Config {
       return level;
     }
 
-    final configRoot = prov.getConfigRoot();
-    String resolveFromConfigRoot(String reference) =>
-        configRoot?.resolve(reference).toFilePath() ?? reference;
+    final logLevelName = prov.getOneOf(
+      _Props.logLevel,
+      _levels.keys.toSet(),
+    );
+    if (logLevelName != null) {
+      setLoggingLevel(logLevelFromString(logLevelName));
+    }
 
-    final config = Config(
-      sourcePath: prov.getPathList(_Props.sourcePath),
-      classPath: prov.getPathList(_Props.classPath),
-      classes: must(prov.getStringList, [], _Props.classes),
-      summarizerOptions: SummarizerOptions(
+    final configRoot = prov.getConfigRoot();
+    Uri resolveFromConfigRoot(Uri reference) =>
+        configRoot?.resolveUri(reference) ?? reference;
+
+    final config = JniGenerator(
+      input: Input(
+        sourcePath: prov.getPathList(_Props.sourcePath) ?? const [],
+        classPath: prov.getPathList(_Props.classPath) ?? const [],
+        classes: must(prov.getStringList, <String>[], _Props.classes)
+            // An empty YAML entry reads as null. Turn it into an empty name so
+            // that _validateClassName reports it instead of a cast error.
+            .cast<Object?>()
+            .map((className) => className as String? ?? '')
+            .toList(),
         extraArgs: prov.getStringList(_Props.summarizerArgs) ?? const [],
         backend: getSummarizerBackend(prov.getString(_Props.backend), null),
         workingDirectory: prov.getPath(_Props.summarizerWorkingDir),
+        summarizerCommand: prov.getString(_Props.summarizerCommand),
+        mavenDownloads: prov.hasValue(_Props.mavenDownloads)
+            ? MavenDownloads(
+                sourceDeps: prov.getStringList(_Props.sourceDeps) ?? const [],
+                sourceDir: prov.getPath(_Props.mavenSourceDir) ??
+                    resolveFromConfigRoot(MavenDownloads.defaultMavenSourceDir),
+                jarOnlyDeps: prov.getStringList(_Props.jarOnlyDeps) ?? const [],
+                jarDir: prov.getPath(_Props.mavenJarDir) ??
+                    resolveFromConfigRoot(MavenDownloads.defaultMavenJarDir),
+              )
+            : null,
+        androidSdk: prov.hasValue(_Props.androidSdkConfig)
+            ? AndroidSdk(
+                versions: prov
+                    .getStringList(_Props.androidSdkVersions)
+                    ?.map(int.parse)
+                    .toList(),
+                sdkRoot: getSdkRoot(),
+                addGradleDeps: prov.getBool(_Props.addGradleDeps) ?? false,
+                addGradleSources:
+                    prov.getBool(_Props.addGradleSources) ?? false,
+                androidExample: prov.getPath(_Props.androidExample) ??
+                    resolveFromConfigRoot(Uri.directory('.')),
+              )
+            : null,
       ),
-      outputConfig: OutputConfig(
-        dartConfig: DartCodeOutputConfig(
+      output: Output(
+        dart: DartOutput(
           path: must(prov.getPath, Uri.parse('.'), _Props.dartRoot),
           structure: getOutputStructure(
             prov.getString(_Props.outputStructure),
             OutputStructure.packageStructure,
           ),
         ),
-        symbolsConfig: prov.hasValue(_Props.symbolsOutputConfig)
-            ? SymbolsOutputConfig(
+        symbols: prov.hasValue(_Props.symbolsOutputConfig)
+            ? SymbolsOutput(
                 must(prov.getPath, Uri.parse('.'), _Props.symbolsOutputConfig),
               )
             : null,
+        preamble: prov.getString(_Props.preamble) ?? '',
+        generateStubs: prov.getBool(_Props.generateStubs) ?? true,
+        format: prov.getBool(_Props.format) ?? true,
       ),
-      preamble: prov.getString(_Props.preamble),
-      experiments: prov
-          .getStringList(_Props.experiments)
-          ?.map(
-            Experiment.fromString,
-          )
-          .toSet(),
-      imports: prov.getPathList(_Props.import),
-      nonNullAnnotations: prov.hasValue(_Props.nonNullAnnotations)
-          ? prov.getStringList(_Props.nonNullAnnotations)
-          : null,
-      nullableAnnotations: prov.hasValue(_Props.nullableAnnotations)
-          ? prov.getStringList(_Props.nullableAnnotations)
-          : null,
-      mavenDownloads: prov.hasValue(_Props.mavenDownloads)
-          ? MavenDownloads(
-              sourceDeps: prov.getStringList(_Props.sourceDeps) ?? const [],
-              sourceDir: prov.getPath(_Props.mavenSourceDir)?.toFilePath() ??
-                  resolveFromConfigRoot(MavenDownloads.defaultMavenSourceDir),
-              jarOnlyDeps: prov.getStringList(_Props.jarOnlyDeps) ?? const [],
-              jarDir: prov.getPath(_Props.mavenJarDir)?.toFilePath() ??
-                  resolveFromConfigRoot(MavenDownloads.defaultMavenJarDir),
-            )
-          : null,
-      androidSdkConfig: prov.hasValue(_Props.androidSdkConfig)
-          ? AndroidSdkConfig(
-              versions: prov
-                  .getStringList(_Props.androidSdkVersions)
-                  ?.map(int.parse)
-                  .toList(),
-              sdkRoot: getSdkRoot(),
-              addGradleDeps: prov.getBool(_Props.addGradleDeps) ?? false,
-              addGradleSources: prov.getBool(_Props.addGradleSources) ?? false,
-              // Leaving this as getString instead of getPath, because
-              // it's resolved later in android_sdk_tools.
-              androidExample: prov.getString(_Props.androidExample),
-            )
-          : null,
-      logLevel: logLevelFromString(
-        prov.getOneOf(
-          _Props.logLevel,
-          _levels.keys.toSet(),
-        ),
+      imports: SymbolImports(
+        symbolFiles: prov.getPathList(_Props.import) ?? const [],
+        hide: prov.getStringList(_Props.hide) ?? const [],
       ),
-      generateStubs: prov.getBool(_Props.generateStubs) ?? true,
+      nullability: NullabilityAnnotations(
+        nonNull: prov.hasValue(_Props.nonNullAnnotations)
+            ? (prov.getStringList(_Props.nonNullAnnotations) ?? const [])
+            : const [],
+        nullable: prov.hasValue(_Props.nullableAnnotations)
+            ? (prov.getStringList(_Props.nullableAnnotations) ?? const [])
+            : const [],
+      ),
     );
     if (missingValues.isNotEmpty) {
       stderr.write('Following config values are required but not provided\n'
@@ -482,7 +613,7 @@ class Config {
   }
 }
 
-extension ConfigInternal on Config {
+extension JniGeneratorInternal on JniGenerator {
   Map<String, ClassDecl> get importedClasses => _importedClasses;
 
   Future<void> importClasses() async {
@@ -490,7 +621,7 @@ extension ConfigInternal on Config {
     for (final import in [
       // Implicitly importing package:jni symbols.
       Uri.parse('package:jni/jni_symbols.yaml'),
-      ...?imports,
+      ...imports.symbolFiles,
     ]) {
       // Getting the actual uri in case of package uris.
       final Uri yamlUri;
@@ -531,7 +662,7 @@ extension ConfigInternal on Config {
         final classes = entry.value as YamlMap;
         for (final classEntry in classes.entries) {
           final binaryName = classEntry.key as String;
-          if (hide?.contains(binaryName) ?? false) {
+          if (imports.hide.contains(binaryName)) {
             continue;
           }
           final decl = classEntry.value as YamlMap;
@@ -590,22 +721,24 @@ class _Props {
   static const summarizer = 'summarizer';
   static const summarizerArgs = '$summarizer.extra_args';
   static const summarizerWorkingDir = '$summarizer.working_dir';
+  static const summarizerCommand = '$summarizer.command';
   static const backend = '$summarizer.backend';
 
   static const sourcePath = 'source_path';
   static const classPath = 'class_path';
   static const classes = 'classes';
 
-  static const experiments = 'enable_experiment';
   static const import = 'import';
+  static const hide = 'hide';
   static const outputConfig = 'output';
-  static const dartCodeOutputConfig = '$outputConfig.dart';
+  static const dartOutputConfig = '$outputConfig.dart';
   static const symbolsOutputConfig = '$outputConfig.symbols';
-  static const dartRoot = '$dartCodeOutputConfig.path';
-  static const outputStructure = '$dartCodeOutputConfig.structure';
+  static const dartRoot = '$dartOutputConfig.path';
+  static const outputStructure = '$dartOutputConfig.structure';
   static const preamble = 'preamble';
   static const logLevel = 'log_level';
   static const generateStubs = 'generate_stubs';
+  static const format = 'format';
 
   static const nonNullAnnotations = 'non_null_annotations';
   static const nullableAnnotations = 'nullable_annotations';

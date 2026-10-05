@@ -15,15 +15,20 @@ import 'package:pub_semver/pub_semver.dart';
 import 'package:test/test.dart';
 import '../test_utils.dart';
 
-String bindingsForVersion({Versions? iosVers, Versions? macosVers}) {
-  FfiGenerator(
+Future<String> bindingsForVersion({
+  Versions? iosVers,
+  Versions? macosVers,
+}) async {
+  final generator = FfiGenerator(
     output: Output(
-      dartFile: Uri.file(
-        path.join(
-          packagePathForTests,
-          'test',
-          'native_objc_test',
-          'deprecated_test_bindings.dart',
+      dart: DartOutput(
+        path: Uri.file(
+          path.join(
+            packagePathForTests,
+            'test',
+            'native_objc_test',
+            'deprecated_test_bindings.dart',
+          ),
         ),
       ),
       format: false,
@@ -45,36 +50,47 @@ String bindingsForVersion({Versions? iosVers, Versions? macosVers}) {
       ],
     ),
     objectiveC: ObjectiveC(
-      interfaces: Interfaces(
-        include: (decl) => {
-          'DeprecatedInterfaceMethods',
-          'DeprecatedInterface',
-        }.contains(decl.originalName),
-      ),
-      protocols: Protocols(
-        include: (decl) => {
-          'DeprecatedProtocolMethods',
-          'DeprecatedProtocol',
-        }.contains(decl.originalName),
-      ),
-      categories: Categories(
-        include: (decl) => {
-          'DeprecatedCategoryMethods',
-          'DeprecatedCategory',
-        }.contains(decl.originalName),
-        includeTransitive: false,
-      ),
       externalVersions: ExternalVersions(ios: iosVers, macos: macosVers),
     ),
-    functions: Functions.includeSet({'normalFunction', 'deprecatedFunction'}),
-    structs: Structs.includeSet({'NormalStruct', 'DeprecatedStruct'}),
-    unions: Unions.includeSet({'NormalUnion', 'DeprecatedUnion'}),
-    enums: Enums.includeSet({'NormalEnum', 'DeprecatedEnum'}),
-    unnamedEnums: UnnamedEnums.includeSet({
-      'normalUnnamedEnum',
-      'deprecatedUnnamedEnum',
-    }),
-  ).generate(logger: createTestLogger());
+    visitors: [
+      Visitor(
+        objCInterface: (node) {
+          node.includeCategories = false;
+          const include = {'DeprecatedInterfaceMethods', 'DeprecatedInterface'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        objCProtocol: (node) {
+          const include = {'DeprecatedProtocolMethods', 'DeprecatedProtocol'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        objCCategory: (node) {
+          const include = {'DeprecatedCategoryMethods', 'DeprecatedCategory'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        func: (node) {
+          const include = {'normalFunction', 'deprecatedFunction'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        struct: (node) {
+          const include = {'NormalStruct', 'DeprecatedStruct'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        union: (node) {
+          const include = {'NormalUnion', 'DeprecatedUnion'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        enumClass: (node) {
+          const include = {'NormalEnum', 'DeprecatedEnum'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+        unnamedEnumConstant: (node) {
+          const include = {'normalUnnamedEnum', 'deprecatedUnnamedEnum'};
+          node.isIncluded = include.contains(node.originalName);
+        },
+      ),
+    ],
+  );
+  await generator.generate(logger: createTestLogger());
   final file = path.join(
     packagePathForTests,
     'test',
@@ -89,8 +105,8 @@ void main() {
   group('deprecated', () {
     group('no version info', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion();
+      setUpAll(() async {
+        bindings = await bindingsForVersion();
       });
 
       test('interfaces', () {
@@ -208,8 +224,10 @@ void main() {
 
     group('ios >=2.5, no macos version', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(iosVers: Versions(min: Version(2, 5, 0)));
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
+          iosVers: Versions(min: Version(2, 5, 0)),
+        );
       });
 
       test('interfaces', () {
@@ -327,8 +345,8 @@ void main() {
 
     group('ios >=2.5, macos >=2.5', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
           iosVers: Versions(min: Version(2, 5, 0)),
           macosVers: Versions(min: Version(2, 5, 0)),
         );
@@ -444,8 +462,8 @@ void main() {
 
     group('ios >=3.5, macos >=3.5', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
           iosVers: Versions(min: Version(3, 5, 0)),
           macosVers: Versions(min: Version(3, 5, 0)),
         );
@@ -561,8 +579,8 @@ void main() {
 
     group('ios >=2.5 <=3.5, macos >=2.5 <=3.5', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
           iosVers: Versions(min: Version(2, 5, 0), max: Version(3, 5, 0)),
           macosVers: Versions(min: Version(2, 5, 0), max: Version(3, 5, 0)),
         );
@@ -678,8 +696,8 @@ void main() {
 
     group('ios <=1.5, macos >=1.5', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
           iosVers: Versions(max: Version(1, 5, 0)),
           macosVers: Versions(min: Version(1, 5, 0)),
         );
@@ -909,8 +927,8 @@ extension type DeprecatedProtocol'''),
 
     group('ios >=0.5 <=0.9, macos >=0.5 <=0.9', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion(
+      setUpAll(() async {
+        bindings = await bindingsForVersion(
           iosVers: Versions(min: Version(0, 5, 0), max: Version(0, 9, 0)),
           macosVers: Versions(min: Version(0, 5, 0), max: Version(0, 9, 0)),
         );
@@ -1025,8 +1043,8 @@ extension type DeprecatedProtocol'''),
     });
     group('@Deprecated annotations', () {
       late final String bindings;
-      setUpAll(() {
-        bindings = bindingsForVersion();
+      setUpAll(() async {
+        bindings = await bindingsForVersion();
       });
 
       test('normal symbols have no @Deprecated annotation', () {

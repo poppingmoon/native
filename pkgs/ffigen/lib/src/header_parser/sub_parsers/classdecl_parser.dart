@@ -17,8 +17,7 @@ CppClass? parseClassDeclaration(Context context, clang_types.CXCursor cursor) {
   final logger = context.logger;
 
   // If C++ support is not configured, skip all C++ class cursors immediately.
-  final cppClasses = config.cpp?.classes;
-  if (cppClasses == null) return null;
+  if (config.cpp == null) return null;
 
   final usr = cursor.usr();
 
@@ -53,17 +52,6 @@ CppClass? parseClassDeclaration(Context context, clang_types.CXCursor cursor) {
     '++++ Adding C++ Class: Name: $className, ${cursor.completeStringRepr()}',
   );
 
-  final methods = <CppMethod>[];
-
-  cursor.visitChildren((child) {
-    final kind = clang.clang_getCursorKind(child);
-    if (kind == clang_types.CXCursorKind.CXCursor_CXXMethod) {
-      _parseAnyMethod(context, child, decl, methods, CppMethodKind.method);
-    } else if (kind == clang_types.CXCursorKind.CXCursor_Constructor) {
-      _parseAnyMethod(context, child, decl, methods, CppMethodKind.constructor);
-    }
-  });
-
   final cppClass = CppClass(
     usr: usr,
     dartDoc: getCursorDocComment(
@@ -72,15 +60,67 @@ CppClass? parseClassDeclaration(Context context, clang_types.CXCursor cursor) {
       availability: apiAvailability.dartDoc,
     ),
     originalName: className,
-    name: cppClasses.rename(decl),
+    name: className,
     context: context,
-    methods: methods,
+    methods: <CppMethod>[],
     fields: <CppMember>[],
+    bases: <CppClass>[],
   );
 
   context.bindingsIndex.addCppClassToSeen(usr, cppClass);
 
+  cursor.visitChildren((child) {
+    final kind = clang.clang_getCursorKind(child);
+    if (kind == clang_types.CXCursorKind.CXCursor_CXXMethod) {
+      _parseAnyMethod(
+        context,
+        child,
+        decl,
+        cppClass.methods,
+        CppMethodKind.method,
+      );
+    } else if (kind == clang_types.CXCursorKind.CXCursor_Constructor) {
+      _parseAnyMethod(
+        context,
+        child,
+        decl,
+        cppClass.methods,
+        CppMethodKind.constructor,
+      );
+    }
+  });
+
+  // Parse public base classes (only public specifiers; non-public are ignored).
+  cppClass.bases.addAll(_parsePublicBases(context, cursor));
+
   return cppClass;
+}
+
+/// Parses the direct public base classes of [cursor].
+List<CppClass> _parsePublicBases(Context context, clang_types.CXCursor cursor) {
+  final bases = <CppClass>[];
+
+  cursor.visitChildren((child) {
+    final kind = clang.clang_getCursorKind(child);
+    if (kind != clang_types.CXCursorKind.CXCursor_CXXBaseSpecifier) return;
+
+    final access = clang.clang_getCXXAccessSpecifier(child);
+    if (access != clang_types.CX_CXXAccessSpecifier.CX_CXXPublic) return;
+
+    final baseType = clang.clang_getCursorType(child);
+    final baseDeclCursor = clang.clang_getTypeDeclaration(baseType);
+    final baseUsr = baseDeclCursor.usr();
+
+    final baseClass = context.bindingsIndex.getSeenCppClass(baseUsr);
+    if (baseClass == null) {
+      final parsed = parseClassDeclaration(context, baseDeclCursor);
+      if (parsed != null) bases.add(parsed);
+    } else {
+      bases.add(baseClass);
+    }
+  });
+
+  return bases;
 }
 
 void _parseAnyMethod(
@@ -99,15 +139,46 @@ void _parseAnyMethod(
       kind == CppMethodKind.method &&
       clang.clang_CXXMethod_isConst(cursor) != 0;
 
-  final parameters = _parseParameters(context, cursor, classDecl);
-  if (parameters == null) {
+  final (:parameters, :hasIncompleteStruct, :hasUnimplementedType) =
+      parseParameters(context, cursor);
+  if (hasIncompleteStruct || hasUnimplementedType) {
     logger.fine(
       '  ---- Skipping method $methodName due to unsupported parameter type',
     );
     return;
   }
+  if (parameters.any((p) => p.type.typealiasType is CppClass)) {
+    // TODO(https://github.com/dart-lang/native/issues/3603)
+    logger.fine(
+      '  ---- Skipping method $methodName, passing a C++ class by value is '
+      'not currently supported',
+    );
+    return;
+  }
 
-  final className = context.config.cpp!.classes.rename(classDecl);
+  final returnType = clang
+      .clang_getCursorResultType(cursor)
+      .toCodeGenType(context);
+  if (returnType.baseType is UnimplementedType) {
+    logger.fine(
+      '  ---- Skipping method $methodName due to unsupported return type',
+    );
+    return;
+  } else if (returnType.isIncompleteCompound) {
+    logger.fine(
+      '  ---- Skipping method $methodName, incomplete struct returned by value',
+    );
+    return;
+  } else if (returnType.typealiasType is CppClass) {
+    // TODO(https://github.com/dart-lang/native/issues/3603)
+    logger.fine(
+      '  ---- Skipping method $methodName, returning a C++ class by value is '
+      'not currently supported',
+    );
+    return;
+  }
+
+  final className = classDecl.originalName;
   final symbol = switch (kind) {
     CppMethodKind.constructor => '${className}_new',
     CppMethodKind.method => '${className}_$methodName',
@@ -116,34 +187,14 @@ void _parseAnyMethod(
   logger.fine('  ++++ ${kind.name}: $methodName (const=$isConst)');
   methods.add(
     CppMethod(
-      name: Symbol(symbol, SymbolKind.method),
+      name: Symbol(methodName, SymbolKind.method),
+      cBindingSymbol: Symbol(symbol, SymbolKind.method),
       originalName: methodName,
-      returnType: clang
-          .clang_getCursorResultType(cursor)
-          .toCodeGenType(context),
+      returnType: returnType,
       parameters: parameters,
       isConstant: isConst,
       isStatic: isStatic,
       kind: kind,
     ),
   );
-}
-
-List<Parameter>? _parseParameters(
-  Context context,
-  clang_types.CXCursor cursor,
-  Declaration classDecl,
-) {
-  final logger = context.logger;
-  var i = 0;
-  final parsed = parseParameters(
-    context,
-    cursor,
-    renameFn: (paramName) => paramName.isEmpty ? 'arg${i++}' : paramName,
-  );
-  if (parsed.hasIncompleteStruct || parsed.hasUnimplementedType) {
-    logger.fine('  Unsupported parameter type');
-    return null;
-  }
-  return parsed.parameters;
 }

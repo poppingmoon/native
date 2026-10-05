@@ -14,13 +14,18 @@ import 'package:quiver/pattern.dart' as quiver;
 import '../code_generator.dart';
 import 'config.dart';
 import 'path_finder.dart';
+import 'utils.dart';
 
 export 'package:pub_semver/pub_semver.dart' show Version;
 
 enum Language { c, objc }
 
+/// Configuration for generated comments.
 class CommentType {
+  /// The style of comments to parse.
   final CommentStyle style;
+
+  /// The length of comments to generate.
   final CommentLength length;
 
   const CommentType(this.style, this.length);
@@ -37,11 +42,55 @@ class CommentType {
       length = CommentLength.none;
 }
 
-enum CommentStyle { doxygen, any }
+/// The style of comments to parse from headers.
+enum CommentStyle {
+  /// Parse Doxygen-style comments.
+  doxygen,
 
-enum CommentLength { none, brief, full }
+  /// Match any comments.
+  any,
+}
 
-enum CompoundDependencies { full, opaque }
+/// The length of comments to generate.
+enum CommentLength {
+  /// Do not generate comments.
+  none,
+
+  /// Generate brief comments.
+  brief,
+
+  /// Generate full comments.
+  full,
+}
+
+/// How dependent structs or unions are generated.
+enum CompoundDependencies {
+  /// Generate the full definition.
+  full,
+
+  /// Generate as an opaque struct or union.
+  opaque,
+}
+
+/// Controls whether and how a `Typealias` (typedef) is included in generated
+/// code.
+enum TypealiasInclude {
+  /// Never generate a typedef declaration for this typealias.
+  ///
+  /// Any generated functions, structs, or other bindings that reference this
+  /// typealias will inline the underlying aliased type instead.
+  never,
+
+  /// Generate a typedef declaration only if this typealias is referenced by
+  /// another generated binding.
+  ///
+  /// If no generated bindings reference this typealias, it is omitted.
+  ifUsed,
+
+  /// Always generate a typedef declaration for this typealias, even if no
+  /// other generated bindings reference it.
+  always,
+}
 
 /// Holds config for how Structs Packing will be overriden.
 class StructPackingOverride {
@@ -127,11 +176,11 @@ final class YamlDeclarationFilters {
        _memberIncluder = memberIncluder ?? YamlMemberIncluder();
 
   /// Applies renaming and returns the result.
-  String rename(Declaration declaration) =>
+  String? rename(Declaration declaration) =>
       _renamer.rename(declaration.originalName);
 
   /// Applies member renaming and returns the result.
-  String renameMember(Declaration declaration, String member) =>
+  String? renameMember(Declaration declaration, String member) =>
       _memberRenamer.rename(declaration.originalName, member);
 
   /// Checks if a name is allowed by a filter.
@@ -145,16 +194,6 @@ final class YamlDeclarationFilters {
   /// Checks if a member is allowed by a filter.
   bool shouldIncludeMember(Declaration declaration, String member) =>
       _memberIncluder.shouldInclude(declaration.originalName, member);
-
-  Declarations configAdapter() {
-    return Declarations(
-      include: shouldInclude,
-      includeSymbolAddress: shouldIncludeSymbolAddress,
-      includeMember: shouldIncludeMember,
-      rename: rename,
-      renameMember: renameMember,
-    );
-  }
 }
 
 /// Matches `$<single_digit_int>`, value can be accessed in group 1 of match.
@@ -172,8 +211,8 @@ class RegExpRenamer {
 
   /// Renames [str] according to [replacementPattern].
   ///
-  /// Returns [str] if [regExp] doesn't have a full match.
-  String rename(String str) {
+  /// Returns `null` if [regExp] doesn't have a full match.
+  String? rename(String str) {
     if (matches(str)) {
       // Get match.
       final regExpMatch = regExp.firstMatch(str)!;
@@ -195,7 +234,7 @@ class RegExpRenamer {
       });
       return result;
     } else {
-      return str;
+      return null;
     }
   }
 
@@ -267,7 +306,7 @@ class YamlRenamer {
 
   YamlRenamer.noRename() : _renameMatchers = [], _renameFull = {};
 
-  String rename(String name) {
+  String? rename(String name) {
     // Apply full rename (if any).
     if (_renameFull.containsKey(name)) {
       return _renameFull[name]!;
@@ -275,13 +314,13 @@ class YamlRenamer {
 
     // Apply rename regexp (if matches).
     for (final renamer in _renameMatchers) {
-      if (renamer.matches(name)) {
-        return renamer.rename(name);
+      if (renamer.rename(name) case final rename?) {
+        return rename;
       }
     }
 
-    // No renaming is provided for this declaration, return unchanged.
-    return name;
+    // No renaming is provided for this declaration, return null.
+    return null;
   }
 }
 
@@ -316,7 +355,7 @@ class YamlMemberRenamer {
   }) : _memberRenameFull = memberRenameFull ?? {},
        _memberRenameMatchers = memberRenamePattern ?? [];
 
-  String rename(String declaration, String member) {
+  String? rename(String declaration, String member) {
     if (_cache.containsKey(declaration)) {
       return _cache[declaration]!.rename(member);
     }
@@ -337,8 +376,8 @@ class YamlMemberRenamer {
       }
     }
 
-    // No renaming is provided for this declaration, return unchanged.
-    return member;
+    // No renaming is provided for this declaration, return null.
+    return null;
   }
 }
 
@@ -372,10 +411,29 @@ class YamlMemberIncluder {
 List<String> defaultCompilerOpts(
   Logger logger, {
   bool macIncludeStdLib = true,
+  bool cpp = false,
+}) => cpp
+    ? [
+        '-x',
+        'c++',
+        '-std=c++17',
+        if (Platform.isMacOS) ...['-isysroot', macSdkPath],
+      ]
+    : [
+        if (Platform.isMacOS && macIncludeStdLib)
+          ...getCStandardLibraryHeadersForMac(logger),
+        if (Platform.isMacOS) '-Wno-nullability-completeness',
+      ];
+
+/// Computes compiler options based on [config] and [logger].
+List<String> computeCompilerOpts({
+  required FfiGenerator config,
+  required Logger logger,
 }) => [
-  if (Platform.isMacOS && macIncludeStdLib)
-    ...getCStandardLibraryHeadersForMac(logger),
-  if (Platform.isMacOS) '-Wno-nullability-completeness',
+  if (config.input.appendCompilerOptions ||
+      config.input.compilerOptions == null)
+    ...defaultCompilerOpts(logger, cpp: config.cpp != null),
+  if (config.input.compilerOptions != null) ...config.input.compilerOptions!,
 ];
 
 /// Handles config for automatically added compiler options.
@@ -427,8 +485,20 @@ class FfiNativeConfig {
   const FfiNativeConfig({required this.enabled, this.assetId});
 }
 
+/// Configuration for generating a symbol file.
+///
+/// Symbol files allow other FFIgen runs to import and reuse symbols defined in
+/// these bindings rather than regenerating them.
 class SymbolFile {
+  /// The package or file URI that other bindings will use to import the
+  /// generated Dart bindings for these symbols.
+  ///
+  /// Using a `package:...` URI is recommended for cross-package imports, so
+  /// that other packages can resolve the import regardless of directory
+  /// structure.
   final Uri importPath;
+
+  /// The file URI where YAML symbol file will be generated.
   final Uri output;
 
   SymbolFile(this.importPath, this.output);
@@ -442,26 +512,35 @@ class OutputConfig {
   OutputConfig(this.output, this.outputObjC, this.symbolFile);
 }
 
-class RawVarArgFunction {
-  String? postfix;
-  final List<String> rawTypeStrings;
-
-  RawVarArgFunction(this.postfix, this.rawTypeStrings);
-}
-
 /// A specialization of a variadic function with specific argument types.
 class VarArgFunction {
   /// A suffix to append to the function name for this variant.
-  final String postfix;
+  String postfix;
 
-  /// The types that will passed as the variadic parameters, replacing the
+  /// The types that will be passed as the variadic parameters, replacing the
   /// `...` in the original definition.
-  final List<Type> types;
+  ///
+  /// Supported type strings are:
+  /// - Primitive C types such as `int`, `uint64_t`, `size_t`, or `double`.
+  /// - A type defined elsewhere in the same generated bindings.
+  /// - An import from a built in package like `package:ffi`.
+  /// - Any name that [FfiGenerator]`.importType` converts to an [ImportedType].
+  /// - Any above type, followed by any number of `*` to represent pointers.
+  ///
+  /// Note: We're using `String`s to represent these types, for consistency with
+  /// the legacy YAML format. This approach has worked for our YAML users for
+  /// years, but it's not ideal for a Dart API. We may switch to representing
+  /// types as Dart objects in future, but if we do, the design will be based on
+  /// user feedback. If you have a use case for a Dart representation of these
+  /// types, let us know by filing an issue on GitHub.
+  List<String> types;
 
-  VarArgFunction(this.postfix, this.types);
+  VarArgFunction({this.postfix = '', required this.types});
 }
 
+/// Struct byte alignment packing value override.
 class PackingValue {
+  /// The byte alignment packing value.
   int? value;
   PackingValue(this.value);
 }
@@ -486,14 +565,45 @@ class Declaration {
   Declaration({required this.usr, required this.originalName});
 }
 
+/// Target OS version constraints for external platform APIs (such as
+/// Objective-C APIs).
+///
+/// Interfaces, methods, and other API elements in headers may include
+/// platform availability annotations indicating when they were introduced,
+/// deprecated, or obsoleted. If an API element is present in all target
+/// versions, it is generated normally. If it's present in some target versions,
+/// a runtime version check is generated. If it's not present in any target
+/// versions, the API element is not generated at all.
+///
+/// If all fields are `null`, no version based filtering is applied. If some
+/// fields are non-`null`, filtering is based on the non-`null` fields.
 class ExternalVersions {
+  /// Target version range for iOS.
+  ///
+  /// If `null`, no version-based filtering is applied for iOS.
   final Versions? ios;
+
+  /// Target version range for macOS.
+  ///
+  /// If `null`, no version-based filtering is applied for macOS.
   final Versions? macos;
+
   const ExternalVersions({this.ios, this.macos});
 }
 
+/// Represents a version range constraint with an optional minimum and maximum
+/// version.
+///
+/// If [min] and [max] are both `null`, all versions are accepted.
 class Versions {
+  /// The minimum target OS version.
+  ///
+  /// If `null`, there is no minimum version floor.
   final Version? min;
+
+  /// The maximum target OS version.
+  ///
+  /// If `null`, there is no maximum version ceiling.
   final Version? max;
 
   const Versions({this.min, this.max});

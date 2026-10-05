@@ -11,20 +11,22 @@ void main() {
   test('Java core libraries are generated without providing class path',
       () async {
     await generateAndAnalyzeBindings(
-      Config(
-        outputConfig: OutputConfig(
-          dartConfig: DartCodeOutputConfig(
+      JniGenerator(
+        input: Input(
+          classes: [
+            // A random assortment of Java core classes.
+            'java.lang.StringBuilder',
+            'java.lang.ModuleLayer',
+            'java.net.SocketOption',
+            'java.lang.ref', // Also works with packages.
+          ],
+        ),
+        output: Output(
+          dart: DartOutput(
             path: Uri.file('foo.dart'),
             structure: OutputStructure.singleFile,
           ),
         ),
-        classes: [
-          // A random assortment of Java core classes.
-          'java.lang.StringBuilder',
-          'java.lang.ModuleLayer',
-          'java.net.SocketOption',
-          'java.lang.ref', // Also works with packages.
-        ],
       ),
       confirmExists: [
         'StringBuilder',
@@ -38,19 +40,21 @@ void main() {
   test('Kotlin stdlib libraries are generated without providing class path',
       () async {
     await generateAndAnalyzeBindings(
-      Config(
-        outputConfig: OutputConfig(
-          dartConfig: DartCodeOutputConfig(
+      JniGenerator(
+        input: Input(
+          classes: [
+            // A random assortment of Kotlin stdlib classes.
+            'kotlin.io.AccessDeniedException',
+            'kotlin.ranges.CharRange',
+            'kotlin.random', // Also works with packages.
+          ],
+        ),
+        output: Output(
+          dart: DartOutput(
             path: Uri.file('foo.dart'),
             structure: OutputStructure.singleFile,
           ),
         ),
-        classes: [
-          // A random assortment of Kotlin stdlib classes.
-          'kotlin.io.AccessDeniedException',
-          'kotlin.ranges.CharRange',
-          'kotlin.random', // Also works with packages.
-        ],
       ),
       confirmExists: [
         'AccessDeniedException',

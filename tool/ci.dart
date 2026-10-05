@@ -190,7 +190,10 @@ class WorkspaceTask extends Task {
     final rootDir = Directory.fromUri(repositoryRoot.resolve('pkgs'));
     for (final entity in rootDir.listSync(recursive: true)) {
       if (entity is File && entity.path.endsWith('pubspec.yaml')) {
-        if (entity.path.split(Platform.pathSeparator).contains('.dart_tool')) {
+        final pathSegments = entity.path.split(Platform.pathSeparator);
+        if (pathSegments.contains('.dart_tool') ||
+            pathSegments.contains('ephemeral')) {
+          // Can contain generated or symlinked pubspecs.
           continue;
         }
         packages.add(
@@ -355,9 +358,17 @@ class GenerateTask extends Task {
       'pkgs/hooks/tool/generate_schemas.dart',
       'pkgs/hooks/tool/generate_syntax.dart',
       'pkgs/hooks/tool/normalize.dart',
-      'pkgs/hooks/tool/update_snippets.dart',
       'pkgs/pub_formats/tool/generate.dart',
       'pkgs/record_use/tool/generate_syntax.dart',
+    ];
+    const snippetTargets = [
+      'pkgs/hooks',
+      'pkgs/code_assets',
+      'pkgs/data_assets',
+      'pkgs/jni_util',
+      'pkgs/web_assets',
+      'pkgs/record_use',
+      'pkgs/swift2objc',
     ];
     final fix = argResults['fix'] as bool;
     await _runMaybeParallel([
@@ -366,6 +377,12 @@ class GenerateTask extends Task {
           generator,
           if (!fix) '--set-exit-if-changed',
         ]),
+      () => _runProcess('dart', [
+        'run',
+        'snippet_tool',
+        if (!fix) '--set-exit-if-changed',
+        ...snippetTargets,
+      ]),
     ], argResults);
   }
 }
@@ -396,6 +413,12 @@ class TestTask extends Task {
           .toList();
     }
     final testUris = getUriInPackage(packages, 'test');
+    if (coverageTask.shouldRun(argResults)) {
+      final coverageDir = Directory.fromUri(repositoryRoot.resolve('coverage'));
+      if (coverageDir.existsSync()) {
+        coverageDir.deleteSync(recursive: true);
+      }
+    }
     await _runProcess('dart', [
       'test',
       if (coverageTask.shouldRun(argResults)) '--coverage=./coverage',
@@ -433,17 +456,19 @@ class ExampleTask extends Task {
       'pkgs/hooks/example/build/download_asset/',
       'pkgs/hooks/example/build/native_add_app/',
       'pkgs/hooks/example/build/native_dynamic_linking/',
+      'pkgs/hooks/example/build/prebuilt_assets_example/',
       'pkgs/hooks/example/build/system_library/',
       'pkgs/hooks/example/build/use_dart_api/',
     ];
-    await _runMaybeParallel([
-      for (final exampleWithTest in examplesWithTest)
-        () => _runProcess(
-          workingDirectory: repositoryRoot.resolve(exampleWithTest),
-          'dart',
-          ['test'],
-        ),
-    ], argResults);
+    // Run sequentially because `dart test` in a pub workspace copies to the
+    // shared `<workspace_root>/.dart_tool/native_assets.yaml`.
+    for (final exampleWithTest in examplesWithTest) {
+      await _runProcess(
+        workingDirectory: repositoryRoot.resolve(exampleWithTest),
+        'dart',
+        ['test'],
+      );
+    }
 
     await _runProcess(
       workingDirectory: repositoryRoot.resolve(
@@ -500,6 +525,8 @@ class CoverageTask extends Task {
       'coverage:format_coverage',
       '--packages=.dart_tool/package_config.json',
       for (final libUri in libUris) '--report-on=$libUri',
+      '--check-ignore',
+      '--ignore-files=**/*.g.dart',
       '--lcov',
       '-o',
       './coverage/lcov.info',
@@ -587,6 +614,31 @@ class LicenseTask extends Task {
   }
 }
 
+/// Checks for missing, under-promoted, over-promoted, and unused dependencies.
+class DependencyValidatorTask extends Task {
+  const DependencyValidatorTask()
+    : super(
+        name: 'dependency-validator',
+        helpMessage: 'Run `dependency_validator` on the packages.',
+      );
+
+  @override
+  Future<void> run({
+    required List<String> packages,
+    required ArgResults argResults,
+  }) async {
+    await _runMaybeParallel([
+      for (final package in packages)
+        () => _runProcess('dart', [
+          'run',
+          'dependency_validator',
+          '-C',
+          package,
+        ]),
+    ], argResults);
+  }
+}
+
 const pubTask = PubTask();
 const licenseTask = LicenseTask();
 const analyzeTask = AnalyzeTask();
@@ -597,6 +649,7 @@ const exampleTask = ExampleTask();
 const coverageTask = CoverageTask();
 const apiToolTask = ApiToolTask();
 const workspaceTask = WorkspaceTask();
+const dependencyValidatorTask = DependencyValidatorTask();
 
 // The order of tasks is intentional.
 final tasks = [
@@ -605,6 +658,7 @@ final tasks = [
   licenseTask,
   analyzeTask,
   formatTask,
+  dependencyValidatorTask,
   testTask,
   exampleTask,
   coverageTask,

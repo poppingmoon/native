@@ -6,10 +6,13 @@
 @OnPlatform({'windows': Timeout.factor(10)})
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:code_assets/code_assets.dart';
 import 'package:native_toolchain_c/src/native_toolchain/msvc.dart';
 import 'package:native_toolchain_c/src/utils/env_from_bat.dart';
+import 'package:process/process.dart';
 import 'package:test/test.dart';
 
 import '../helpers.dart';
@@ -25,8 +28,15 @@ void main() {
     expect(instances.isNotEmpty, true);
   });
 
-  test('visualStudio', () async {
-    final instances = await visualStudio.defaultResolver!.resolve(
+  test('visualStudioX64', () async {
+    final instances = await visualStudioX64.defaultResolver!.resolve(
+      systemContext,
+    );
+    expect(instances.isNotEmpty, true);
+  });
+
+  test('visualStudioArm64', () async {
+    final instances = await visualStudioArm64.defaultResolver!.resolve(
       systemContext,
     );
     expect(instances.isNotEmpty, true);
@@ -37,19 +47,46 @@ void main() {
     expect(instances.isNotEmpty, true);
   });
 
-  test('cl', () async {
-    final instances = await cl.defaultResolver!.resolve(systemContext);
-    expect(instances.isNotEmpty, true);
-  });
+  test('parseVswhere handles mixed installations', () async {
+    final tempUri = await tempDirForTest();
+    final ssmsDir = Directory.fromUri(
+      tempUri.resolve('Microsoft SQL Server Management Studio 22/Release'),
+    );
+    final visualStudioDir = Directory.fromUri(
+      tempUri.resolve('Microsoft Visual Studio/18/Community'),
+    );
+    await ssmsDir.create(recursive: true);
+    await visualStudioDir.create(recursive: true);
 
-  test('clIA32', () async {
-    final instances = await clIA32.defaultResolver!.resolve(systemContext);
-    expect(instances.isNotEmpty, true);
-  });
+    final instances = VisualStudioResolver(targetArchitecture: Architecture.x64)
+        .parseVswhere(
+          jsonEncode([
+            {
+              'installationName': 'SSMS/22.5.0+11709.299',
+              'installationPath': ssmsDir.path,
+              'installationVersion': '22.5.11709.299',
+              'productId': 'Microsoft.VisualStudio.Product.Ssms',
+              'displayName': 'SQL Server Management Studio 22',
+            },
+            {
+              'installationName': 'VisualStudio/18.5.1+11716.220',
+              'installationPath': visualStudioDir.path,
+              'installationVersion': '18.5.11716.220',
+              'productId': 'Microsoft.VisualStudio.Product.Community',
+              'displayName': 'Visual Studio Community 2026',
+            },
+            {
+              'installationName': 'Incomplete entry',
+              'productId': 'Microsoft.VisualStudio.Product.Incomplete',
+            },
+          ]),
+          systemContext.fileSystem,
+        );
 
-  test('clArm64', () async {
-    final instances = await clArm64.defaultResolver!.resolve(systemContext);
-    expect(instances.isNotEmpty, true);
+    expect(instances, hasLength(2));
+    expect(instances.first.uri, ssmsDir.uri);
+    expect(instances.last.uri, visualStudioDir.uri);
+    expect(instances.map((instance) => instance.version!.major), [22, 18]);
   });
 
   test('lib', () async {
@@ -97,7 +134,10 @@ void main() {
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
     expect(instance.tool, vcvars32);
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -112,7 +152,10 @@ void main() {
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
     expect(instance.tool, vcvars64);
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -127,7 +170,10 @@ void main() {
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
     expect(instance.tool, vcvarsarm64);
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -136,7 +182,10 @@ void main() {
     final instances = await vcvars32.defaultResolver!.resolve(systemContext);
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -145,7 +194,10 @@ void main() {
     final instances = await vcvars64.defaultResolver!.resolve(systemContext);
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -154,7 +206,10 @@ void main() {
     final instances = await vcvarsarm64.defaultResolver!.resolve(systemContext);
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });
@@ -166,6 +221,7 @@ void main() {
     final env = await environmentFromBatchFile(
       instance.uri,
       arguments: ['x64', 'uwp', '10.0'],
+      processManager: const LocalProcessManager(),
     );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
@@ -175,7 +231,10 @@ void main() {
     final instances = await vsDevCmd.defaultResolver!.resolve(systemContext);
     expect(instances.isNotEmpty, true);
     final instance = instances.first;
-    final env = await environmentFromBatchFile(instance.uri);
+    final env = await environmentFromBatchFile(
+      instance.uri,
+      processManager: const LocalProcessManager(),
+    );
     expect(env['INCLUDE'] != null, true);
     expect(env['WindowsSdkDir'] != null, true); // stdio.h
   });

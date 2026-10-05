@@ -18,15 +18,17 @@ import '../test_utils.dart';
 void main() {
   group('NSRange', () {
     late final String bindings;
-    setUpAll(() {
-      FfiGenerator(
+    setUpAll(() async {
+      final generator = FfiGenerator(
         output: Output(
-          dartFile: Uri.file(
-            path.join(
-              packagePathForTests,
-              'test',
-              'native_objc_test',
-              'ns_range_test_bindings.dart',
+          dart: DartOutput(
+            path: Uri.file(
+              path.join(
+                packagePathForTests,
+                'test',
+                'native_objc_test',
+                'ns_range_test_bindings.dart',
+              ),
             ),
           ),
           format: false,
@@ -46,13 +48,15 @@ void main() {
             ),
           ],
         ),
-        objectiveC: ObjectiveC(
-          interfaces: Interfaces(
-            include: (decl) =>
-                {'SFTranscriptionSegment'}.contains(decl.originalName),
+        objectiveC: const ObjectiveC(),
+        visitors: [
+          Visitor(
+            objCInterface: (node) =>
+                node.isIncluded = node.originalName == 'SFTranscriptionSegment',
           ),
-        ),
-      ).generate(logger: createTestLogger());
+        ],
+      );
+      await generator.generate(logger: createTestLogger());
       final file = path.join(
         packagePathForTests,
         'test',

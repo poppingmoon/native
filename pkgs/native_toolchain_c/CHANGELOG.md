@@ -1,7 +1,30 @@
-## 0.19.4-wip
+## 0.19.6-wip
 
+- Default `linkerOptions` to `LinkerOptions.manual()` in `CLinker.run` when omitted so static archives link all symbols by default.
+- Fix `LinkerOptions.treeshake` on Windows for thousands of symbols: no longer
+  pass an `/INCLUDE:` flag per symbol in addition to the generated
+  module-definition file, which exceeded the Windows command-line length limit.
+  The generated module-definition file also no longer names the DLL `MyDLL`.
+
+## 0.19.5
+
+- Support `Architecture.arm64e` for macOS and iOS.
+- Bump `package:code_assets` dependency to `^2.1.0`.
+- Access all file system state through a `package:file` `FileSystem`, exposed as
+  an optional parameter on `CBuilder.run`, `CLinker.run`, `CLibrary.build`, and
+  `CLibrary.link` (defaulting to `LocalFileSystem`), so file system access can be
+  mocked in tests. ([#3072](https://github.com/dart-lang/native/issues/3072))
+
+## 0.19.4
+
+- Fix [native_toolchain_c failing with MSSSMS installed](https://github.com/dart-lang/native/issues/3327) by requiring vswhere to only show output that includes the necessary build tools
 - Link frameworks for C and C++ sources targeting macOS or iOS.
   ([#3162](https://github.com/dart-lang/native/issues/3162))
+- Bump `package:code_assets` dependency to `^2.0.0`.
+- Spawn all processes through a `package:process` `ProcessManager`, exposed as
+  an optional parameter on `CBuilder.run`, `CLinker.run`, `CLibrary.build`, and
+  `CLibrary.link` (defaulting to `LocalProcessManager`), so process invocations
+  can be mocked in tests. ([#3072](https://github.com/dart-lang/native/issues/3072))
 
 ## 0.19.3
 
@@ -20,7 +43,8 @@
 
 ## 0.19.2
 
-- Fixed compatibility with newer Xcode versions when cross-compiling static libraries on macOS hosts targeting Android and Linux.
+- Fixed compatibility with newer Xcode versions when cross-compiling static
+  libraries on macOS hosts targeting Android and Linux.
 
 ## 0.19.1
 

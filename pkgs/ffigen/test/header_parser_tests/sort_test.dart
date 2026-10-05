@@ -4,6 +4,7 @@
 
 import 'package:ffigen/src/code_generator.dart';
 import 'package:ffigen/src/config_provider.dart';
+import 'package:ffigen/src/config_provider/public_visitor.dart';
 import 'package:ffigen/src/header_parser.dart' as parser;
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
@@ -18,7 +19,7 @@ void main() {
       actual = parser.parse(
         testContext(
           FfiGenerator(
-            output: Output(dartFile: Uri.file('unused')),
+            output: Output(dart: DartOutput(path: Uri.file('unused'))),
             input: Input(
               entryPoints: [
                 Uri.file(
@@ -31,19 +32,20 @@ void main() {
                 ),
               ],
             ),
-            structs: Structs.includeAll,
-            unions: Unions.includeAll,
-            typedefs: Typedefs(
-              include: (Declaration decl) => true,
-              includeUnused: true,
-            ),
+            visitors: [
+              Visitor(
+                struct: (node) => node.isIncluded = true,
+                union: (node) => node.isIncluded = true,
+                typealias: (node) => node.isIncluded = .always,
+              ),
+            ],
           ),
         ),
       );
     });
-    test('Expected Bindings', () {
+    test('Expected Bindings', () async {
       final context = testContext();
-      matchLibraryWithExpected(
+      await matchLibraryWithExpected(
         context,
         actual,
         'header_parser_sort_test_output.dart',

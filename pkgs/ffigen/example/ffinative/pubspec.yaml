@@ -5,7 +5,7 @@
 name: ffinative_example
 
 environment:
-  sdk: '>=3.8.0 <4.0.0'
+  sdk: '>=3.10.0 <4.0.0'
 
 dependencies:
   ffi: ^2.0.1
@@ -14,3 +14,13 @@ dev_dependencies:
   dart_flutter_team_lints: ^3.5.2
   ffigen:
     path: '../../'
+
+dependency_overrides:
+  code_assets:
+    path: ../../../code_assets
+  hooks:
+    path: ../../../hooks
+  native_toolchain_c:
+    path: ../../../native_toolchain_c
+  record_use:
+    path: ../../../record_use

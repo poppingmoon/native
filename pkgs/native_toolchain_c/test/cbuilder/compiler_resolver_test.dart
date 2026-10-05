@@ -7,12 +7,14 @@ library;
 
 import 'package:code_assets/code_assets.dart';
 import 'package:collection/collection.dart';
+import 'package:file/local.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/src/cbuilder/compiler_resolver.dart';
 import 'package:native_toolchain_c/src/native_toolchain/apple_clang.dart';
 import 'package:native_toolchain_c/src/native_toolchain/clang.dart';
 import 'package:native_toolchain_c/src/native_toolchain/msvc.dart' as msvc;
 import 'package:native_toolchain_c/src/tool/tool_error.dart';
+import 'package:process/process.dart';
 import 'package:test/test.dart';
 
 import '../helpers.dart';
@@ -76,6 +78,8 @@ void main() {
     final resolver = CompilerResolver(
       codeConfig: buildInput.config.code,
       logger: logger,
+      processManager: const LocalProcessManager(),
+      fileSystem: const LocalFileSystem(),
     );
     final compiler = await resolver.resolveCompiler();
     final archiver = await resolver.resolveArchiver();
@@ -114,6 +118,8 @@ void main() {
     final resolver = CompilerResolver(
       codeConfig: buildInput.config.code,
       logger: logger,
+      processManager: const LocalProcessManager(),
+      fileSystem: const LocalFileSystem(),
       hostOS: .android, // This is never a host.
       hostArchitecture: .arm64, // This is never a host.
     );

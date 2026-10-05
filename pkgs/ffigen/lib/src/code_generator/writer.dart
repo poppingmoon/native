@@ -13,7 +13,7 @@ import 'utils.dart';
 /// To store generated String bindings.
 class Writer {
   final Context context;
-  final String? header;
+  final String header;
 
   /// Holds bindings, which lookup symbols.
   final List<Binding> lookUpBindings;
@@ -41,17 +41,14 @@ class Writer {
   bool get canGenerateSymbolOutput => _canGenerateSymbolOutput;
   bool _canGenerateSymbolOutput = false;
 
-  final bool silenceEnumWarning;
-
   Writer({
     required this.lookUpBindings,
     required this.ffiNativeBindings,
     required this.noLookUpBindings,
     required this.nativeAssetId,
     this.classDocComment,
-    this.header,
+    this.header = '',
     required this.generateForPackageObjectiveC,
-    required this.silenceEnumWarning,
     required this.nativeEntryPoints,
     required this.context,
   }) : symbolAddressWriter = SymbolAddressWriter(context);
@@ -65,7 +62,7 @@ class Writer {
     final result = StringBuffer();
 
     // Write file header (if any).
-    if (header != null) {
+    if (header.isNotEmpty) {
       result.writeln(header);
     }
 
@@ -185,23 +182,26 @@ const _\$objcVersionCheck = $objcPrefix.ObjCVersionCheck(
     result.write(s);
 
     // Warn about Enum usage in API surface.
-    if (!silenceEnumWarning) {
-      final notEnums = _allBindings.where(
-        (b) => b is! Type || (b as Type).typealiasType is! EnumClass,
+    final notEnums = _allBindings.where(
+      (b) => b is! Type || (b as Type).typealiasType is! EnumClass,
+    );
+    final usedEnums = visit(
+      context,
+      _FindEnumsVisitation(),
+      notEnums,
+    ).enums.where((e) => !e.silenceWarning);
+    if (usedEnums.isNotEmpty) {
+      final names = usedEnums.map((e) => e.originalName).toList()..sort();
+      context.logger.severe(
+        'The integer type used for enums is '
+        'implementation-defined. FFIgen tries to mimic the integer sizes '
+        'chosen by the most common compilers for the various OS and '
+        'architecture combinations. To prevent any crashes, remove the '
+        'enums from your API surface. To rely on the (unsafe!) mimicking, '
+        'you can silence this warning by setting node.silenceWarning = true '
+        'in a Visitor(enumClass: ...). Affected enums:'
+        '\n\t${names.join('\n\t')}',
       );
-      final usedEnums = visit(context, _FindEnumsVisitation(), notEnums).enums;
-      if (usedEnums.isNotEmpty) {
-        final names = usedEnums.map((e) => e.originalName).toList()..sort();
-        context.logger.severe(
-          'The integer type used for enums is '
-          'implementation-defined. FFIgen tries to mimic the integer sizes '
-          'chosen by the most common compilers for the various OS and '
-          'architecture combinations. To prevent any crashes, remove the '
-          'enums from your API surface. To rely on the (unsafe!) mimicking, '
-          'you can silence this warning by adding silence-enum-warning: true '
-          'to the FFIgen config. Affected enums:\n\t${names.join('\n\t')}',
-        );
-      }
     }
 
     _canGenerateSymbolOutput = true;
@@ -226,7 +226,7 @@ const _\$objcVersionCheck = $objcPrefix.ObjCVersionCheck(
 
     // Warn for macros.
     final hasMacroBindings = bindings.any(
-      (element) => element is Constant && element.usr.contains('@macro@'),
+      (element) => element is MacroConstant,
     );
     if (hasMacroBindings) {
       context.logger.info(
@@ -237,8 +237,7 @@ const _\$objcVersionCheck = $objcPrefix.ObjCVersionCheck(
 
     // Remove internal bindings and macros.
     bindings.removeWhere((element) {
-      return element.isInternal ||
-          (element is Constant && element.usr.contains('@macro@'));
+      return element.isInternal || (element is MacroConstant);
     });
 
     // Sort bindings alphabetically by USR.
@@ -262,7 +261,7 @@ const _\$objcVersionCheck = $objcPrefix.ObjCVersionCheck(
   }
 
   bool _hasLintIgnore(String ignore) =>
-      RegExp('ignore_for_file:\\s*$ignore').hasMatch(header ?? '');
+      RegExp('ignore_for_file:\\s*$ignore').hasMatch(header);
 
   Map<String, String> _makeSymbolMapValue(Binding b) {
     final dartName = b is Typealias ? getTypedefDartAliasName(b) : null;
@@ -299,7 +298,7 @@ const _\$objcVersionCheck = $objcPrefix.ObjCVersionCheck(
     final s = StringBuffer();
 
     // Write file header (if any).
-    if (header != null) {
+    if (header.isNotEmpty) {
       s.writeln(header);
     }
 
@@ -418,6 +417,7 @@ id objc_retainBlock(id);
   String? generateCpp(String outFilename) {
     final s = StringBuffer();
     final outDir = p.dirname(outFilename);
+    s.write('#include <memory>\n');
     // Emit each entry-point header exactly once.
     for (final header in context.config.input.entryPoints) {
       s.write('#include "${p.relative(header.toFilePath(), from: outDir)}"\n');

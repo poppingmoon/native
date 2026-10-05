@@ -25,7 +25,7 @@ void main(List<String> args) async {
       return;
     }
 
-    const supportedOSs = {OS.iOS, OS.macOS};
+    final supportedOSs = {OS.iOS, OS.macOS};
     final codeConfig = input.config.code;
     final os = codeConfig.targetOS;
     if (!supportedOSs.contains(os)) {
@@ -65,15 +65,11 @@ void main(List<String> args) async {
     final sysroot = sdkPath(codeConfig);
     final minVersion = minOSVersion(codeConfig);
 
-    // TODO(https://github.com/flutter/flutter/issues/186856): Remove this
-    // workaround and just use -target. Atm this is necessary for AOT testing.
-    final useArm64e =
-        testMode && codeConfig.targetArchitecture == Architecture.arm64;
-
     final cFlags = <String>[
       '-isysroot',
       sysroot,
-      if (useArm64e) ...['-arch', 'arm64e'] else ...['-target', target],
+      '-target',
+      target,
       minVersion,
     ];
     final mFlags = [...cFlags, ...objCFlags];
@@ -217,15 +213,20 @@ String toTargetTriple(CodeConfig codeConfig) {
   return appleClangMacosTargetFlags[architecture]!;
 }
 
-const appleClangMacosTargetFlags = {
+final appleClangMacosTargetFlags = {
   Architecture.arm64: 'arm64-apple-darwin',
+  Architecture.arm64e: 'arm64e-apple-darwin',
   Architecture.x64: 'x86_64-apple-darwin',
 };
 
-const appleClangIosTargetFlags = {
+final appleClangIosTargetFlags = {
   Architecture.arm64: {
     IOSSdk.iPhoneOS: 'arm64-apple-ios',
     IOSSdk.iPhoneSimulator: 'arm64-apple-ios-simulator',
+  },
+  Architecture.arm64e: {
+    IOSSdk.iPhoneOS: 'arm64e-apple-ios',
+    IOSSdk.iPhoneSimulator: 'arm64e-apple-ios-simulator',
   },
   Architecture.x64: {IOSSdk.iPhoneSimulator: 'x86_64-apple-ios-simulator'},
 };

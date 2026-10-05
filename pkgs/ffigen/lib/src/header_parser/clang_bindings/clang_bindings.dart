@@ -470,6 +470,19 @@ class Clang {
   late final _clang_Type_getNumObjCProtocolRefs =
       _clang_Type_getNumObjCProtocolRefsPtr.asFunction<int Function(CXType)>();
 
+  /// Returns the number of template arguments for given template
+  /// specialization, or -1 if type \c T is not a template specialization.
+  int clang_Type_getNumTemplateArguments(CXType T) {
+    return _clang_Type_getNumTemplateArguments(T);
+  }
+
+  late final _clang_Type_getNumTemplateArgumentsPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(CXType)>>(
+        'clang_Type_getNumTemplateArguments',
+      );
+  late final _clang_Type_getNumTemplateArguments =
+      _clang_Type_getNumTemplateArgumentsPtr.asFunction<int Function(CXType)>();
+
   /// Retrieves the base type of the ObjCObjectType.
   ///
   /// If the type is not an ObjC object, an invalid type is returned.
@@ -500,6 +513,41 @@ class Clang {
   late final _clang_Type_getObjCProtocolDecl =
       _clang_Type_getObjCProtocolDeclPtr
           .asFunction<CXCursor Function(CXType, int)>();
+
+  /// Return the size of a type in bytes as per C++[expr.sizeof] standard.
+  ///
+  /// If the type declaration is invalid, CXTypeLayoutError_Invalid is returned.
+  /// If the type declaration is an incomplete type, CXTypeLayoutError_Incomplete
+  /// is returned.
+  /// If the type declaration is a dependent type, CXTypeLayoutError_Dependent is
+  /// returned.
+  int clang_Type_getSizeOf(CXType T) {
+    return _clang_Type_getSizeOf(T);
+  }
+
+  late final _clang_Type_getSizeOfPtr =
+      _lookup<ffi.NativeFunction<ffi.LongLong Function(CXType)>>(
+        'clang_Type_getSizeOf',
+      );
+  late final _clang_Type_getSizeOf = _clang_Type_getSizeOfPtr
+      .asFunction<int Function(CXType)>();
+
+  /// Returns the type template argument of a template class specialization
+  /// at given index.
+  ///
+  /// This function only returns template type arguments and does not handle
+  /// template template arguments or variadic packs.
+  CXType clang_Type_getTemplateArgumentAsType(CXType T, int i) {
+    return _clang_Type_getTemplateArgumentAsType(T, i);
+  }
+
+  late final _clang_Type_getTemplateArgumentAsTypePtr =
+      _lookup<ffi.NativeFunction<CXType Function(CXType, ffi.UnsignedInt)>>(
+        'clang_Type_getTemplateArgumentAsType',
+      );
+  late final _clang_Type_getTemplateArgumentAsType =
+      _clang_Type_getTemplateArgumentAsTypePtr
+          .asFunction<CXType Function(CXType, int)>();
 
   /// Provides a shared context for creating translation units.
   ///
@@ -637,6 +685,21 @@ class Clang {
   late final _clang_equalRanges = _clang_equalRangesPtr
       .asFunction<int Function(CXSourceRange, CXSourceRange)>();
 
+  /// Determine whether two CXTypes represent the same type.
+  ///
+  /// \returns non-zero if the CXTypes represent the same type and
+  /// zero otherwise.
+  int clang_equalTypes(CXType A, CXType B) {
+    return _clang_equalTypes(A, B);
+  }
+
+  late final _clang_equalTypesPtr =
+      _lookup<ffi.NativeFunction<ffi.UnsignedInt Function(CXType, CXType)>>(
+        'clang_equalTypes',
+      );
+  late final _clang_equalTypes = _clang_equalTypesPtr
+      .asFunction<int Function(CXType, CXType)>();
+
   /// Format the given diagnostic in a manner that is suitable for display.
   ///
   /// This routine will format the given diagnostic to a string, rendering
@@ -701,6 +764,22 @@ class Clang {
       );
   late final _clang_getCString = _clang_getCStringPtr
       .asFunction<ffi.Pointer<ffi.Char> Function(CXString)>();
+
+  /// Returns the access control level for the referenced object.
+  ///
+  /// If the cursor refers to a C++ declaration, its access control level within its
+  /// parent scope is returned. Otherwise, if the cursor refers to a base specifier or
+  /// access specifier, the specifier itself is returned.
+  int clang_getCXXAccessSpecifier(CXCursor arg0) {
+    return _clang_getCXXAccessSpecifier(arg0);
+  }
+
+  late final _clang_getCXXAccessSpecifierPtr =
+      _lookup<ffi.NativeFunction<ffi.UnsignedInt Function(CXCursor)>>(
+        'clang_getCXXAccessSpecifier',
+      );
+  late final _clang_getCXXAccessSpecifier = _clang_getCXXAccessSpecifierPtr
+      .asFunction<int Function(CXCursor)>();
 
   /// Return the canonical type for a CXType.
   ///
@@ -947,6 +1026,48 @@ class Clang {
       );
   late final _clang_getCursorResultType = _clang_getCursorResultTypePtr
       .asFunction<CXType Function(CXCursor)>();
+
+  /// Determine the semantic parent of the given cursor.
+  ///
+  /// The semantic parent of a cursor is the cursor that semantically contains
+  /// the given \p cursor. For many declarations, the lexical and semantic parents
+  /// are equivalent (the lexical parent is returned by
+  /// \c clang_getCursorLexicalParent()). They diverge when declarations or
+  /// definitions are provided out-of-line. For example:
+  ///
+  /// \code
+  /// class C {
+  /// void f();
+  /// };
+  ///
+  /// void C::f() { }
+  /// \endcode
+  ///
+  /// In the out-of-line definition of \c C::f, the semantic parent is
+  /// the class \c C, of which this function is a member. The lexical parent is
+  /// the place where the declaration actually occurs in the source code; in this
+  /// case, the definition occurs in the translation unit. In general, the
+  /// lexical parent for a given entity can change without affecting the semantics
+  /// of the program, and the lexical parent of different declarations of the
+  /// same entity may be different. Changing the semantic parent of a declaration,
+  /// on the other hand, can have a major impact on semantics, and redeclarations
+  /// of a particular entity should all have the same semantic context.
+  ///
+  /// In the example above, both declarations of \c C::f have \c C as their
+  /// semantic context, while the lexical context of the first \c C::f is \c C
+  /// and the lexical context of the second \c C::f is the translation unit.
+  ///
+  /// For global declarations, the semantic parent is the translation unit.
+  CXCursor clang_getCursorSemanticParent(CXCursor cursor) {
+    return _clang_getCursorSemanticParent(cursor);
+  }
+
+  late final _clang_getCursorSemanticParentPtr =
+      _lookup<ffi.NativeFunction<CXCursor Function(CXCursor)>>(
+        'clang_getCursorSemanticParent',
+      );
+  late final _clang_getCursorSemanticParent = _clang_getCursorSemanticParentPtr
+      .asFunction<CXCursor Function(CXCursor)>();
 
   /// Retrieve a name for the entity referenced by this cursor.
   CXString clang_getCursorSpelling(CXCursor arg0) {
@@ -1349,6 +1470,19 @@ class Clang {
         'clang_isFunctionTypeVariadic',
       );
   late final _clang_isFunctionTypeVariadic = _clang_isFunctionTypeVariadicPtr
+      .asFunction<int Function(CXType)>();
+
+  /// Return 1 if the CXType is a POD (plain old data) type, and 0
+  /// otherwise.
+  int clang_isPODType(CXType T) {
+    return _clang_isPODType(T);
+  }
+
+  late final _clang_isPODTypePtr =
+      _lookup<ffi.NativeFunction<ffi.UnsignedInt Function(CXType)>>(
+        'clang_isPODType',
+      );
+  late final _clang_isPODType = _clang_isPODTypePtr
       .asFunction<int Function(CXType)>();
 
   /// Same as \c clang_parseTranslationUnit2, but returns
@@ -2992,6 +3126,15 @@ final class CXVersion extends ffi.Struct {
 sealed class CXVisitorResult {
   static const CXVisit_Break = 0;
   static const CXVisit_Continue = 1;
+}
+
+/// Represents the C++ access control level to a base class for a
+/// cursor with kind CX_CXXBaseSpecifier.
+sealed class CX_CXXAccessSpecifier {
+  static const CX_CXXInvalidAccessSpecifier = 0;
+  static const CX_CXXPublic = 1;
+  static const CX_CXXProtected = 2;
+  static const CX_CXXPrivate = 3;
 }
 
 /// Represents the storage classes as declared in the source. CX_SC_Invalid

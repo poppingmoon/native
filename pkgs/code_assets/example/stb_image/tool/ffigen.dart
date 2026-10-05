@@ -6,16 +6,22 @@ import 'dart:io';
 
 import 'package:ffigen/ffigen.dart';
 
-void main() {
+Future<void> main() async {
   final packageRoot = Platform.script.resolve('../');
-  FfiGenerator(
+  final generator = FfiGenerator(
     input: Input(entryPoints: [packageRoot.resolve('third_party/stb_image.h')]),
-    functions: Functions(
-      include: (decl) => {'stbi_info'}.contains(decl.originalName),
-      recordUse: (_) => true,
-    ),
+    visitors: [
+      Visitor(
+        func: (node) {
+          node.isIncluded = node.name == 'stbi_info';
+          node.recordUse = true;
+        },
+      ),
+    ],
     output: Output(
-      dartFile: packageRoot.resolve('lib/src/third_party/stb_image.g.dart'),
+      dart: DartOutput(
+        path: packageRoot.resolve('lib/src/third_party/stb_image.g.dart'),
+      ),
       recordUseMapping: packageRoot.resolve(
         'lib/src/third_party/record_use_mapping.dart',
       ),
@@ -38,5 +44,6 @@ void main() {
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ''',
     ),
-  ).generate();
+  );
+  await generator.generate();
 }

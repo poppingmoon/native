@@ -6,8 +6,10 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:code_assets/code_assets.dart';
+import 'package:file/file.dart' show FileSystem;
 import 'package:hooks/hooks.dart';
 import 'package:logging/logging.dart';
+import 'package:process/process.dart';
 
 import '../native_toolchain/msvc.dart';
 import '../native_toolchain/tool_likeness.dart';
@@ -28,6 +30,8 @@ class RunCBuilder {
   final HookInput input;
   final CodeConfig codeConfig;
   final Logger? logger;
+  final ProcessManager processManager;
+  final FileSystem fileSystem;
   final List<Uri> sources;
   final List<Uri> includes;
   final List<Uri> forcedIncludes;
@@ -57,6 +61,8 @@ class RunCBuilder {
   RunCBuilder({
     required this.input,
     required this.codeConfig,
+    required this.processManager,
+    required this.fileSystem,
     this.linkerOptions,
     this.logger,
     this.sources = const [],
@@ -93,6 +99,8 @@ class RunCBuilder {
   late final _resolver = CompilerResolver(
     codeConfig: codeConfig,
     logger: logger,
+    processManager: processManager,
+    fileSystem: fileSystem,
   );
 
   Future<ToolInstance> compiler() async => await _resolver.resolveCompiler();
@@ -225,6 +233,7 @@ class RunCBuilder {
           ),
         ],
         logger: logger,
+        processManager: processManager,
         captureOutput: false,
         throwOnUnexpectedExitCode: true,
         environment: environment,
@@ -256,7 +265,11 @@ class RunCBuilder {
     Uri? outFile,
     Map<String, String> environment,
   ) async {
-    final context = ToolResolvingContext(logger: logger);
+    final context = ToolResolvingContext(
+      logger: logger,
+      processManager: processManager,
+      fileSystem: fileSystem,
+    );
 
     String toolPath(Uri uri) => _toolPath(uri, toolInstance);
 
@@ -369,6 +382,7 @@ class RunCBuilder {
             sourceFiles,
             codeConfig.targetOS,
             codeConfig.targetArchitecture,
+            fileSystem,
           )
         else
           ...sourceFiles,
@@ -399,6 +413,7 @@ class RunCBuilder {
         ],
       ],
       logger: logger,
+      processManager: processManager,
       captureOutput: false,
       throwOnUnexpectedExitCode: true,
     );
@@ -442,6 +457,7 @@ class RunCBuilder {
             sourceFiles,
             codeConfig.targetOS,
             codeConfig.targetArchitecture,
+            fileSystem,
           )
         else ...[
           ...sourceFiles,
@@ -458,6 +474,7 @@ class RunCBuilder {
       workingDirectory: outDir,
       environment: environment,
       logger: logger,
+      processManager: processManager,
       captureOutput: false,
       stdoutLogLevel: Level.INFO,
       throwOnUnexpectedExitCode: true,
@@ -479,6 +496,7 @@ class RunCBuilder {
         workingDirectory: outDir,
         environment: environment,
         logger: logger,
+        processManager: processManager,
         captureOutput: false,
         stdoutLogLevel: Level.INFO,
         throwOnUnexpectedExitCode: true,
@@ -499,7 +517,7 @@ class RunCBuilder {
     return '$baseName.obj';
   }
 
-  static const androidNdkClangTargetFlags = {
+  static final androidNdkClangTargetFlags = {
     Architecture.arm: 'armv7a-linux-androideabi',
     Architecture.arm64: 'aarch64-linux-android',
     Architecture.ia32: 'i686-linux-android',
@@ -507,20 +525,25 @@ class RunCBuilder {
     Architecture.riscv64: 'riscv64-linux-android',
   };
 
-  static const appleClangMacosTargetFlags = {
+  static final appleClangMacosTargetFlags = {
     Architecture.arm64: 'arm64-apple-darwin',
+    Architecture.arm64e: 'arm64e-apple-darwin',
     Architecture.x64: 'x86_64-apple-darwin',
   };
 
-  static const appleClangIosTargetFlags = {
+  static final appleClangIosTargetFlags = {
     Architecture.arm64: {
       IOSSdk.iPhoneOS: 'arm64-apple-ios',
       IOSSdk.iPhoneSimulator: 'arm64-apple-ios-simulator',
     },
+    Architecture.arm64e: {
+      IOSSdk.iPhoneOS: 'arm64e-apple-ios',
+      IOSSdk.iPhoneSimulator: 'arm64e-apple-ios-simulator',
+    },
     Architecture.x64: {IOSSdk.iPhoneSimulator: 'x86_64-apple-ios-simulator'},
   };
 
-  static const clangLinuxTargetFlags = {
+  static final clangLinuxTargetFlags = {
     Architecture.arm: 'arm-linux-gnueabihf',
     Architecture.arm64: 'aarch64-linux-gnu',
     Architecture.ia32: 'i686-linux-gnu',
@@ -529,19 +552,19 @@ class RunCBuilder {
     Architecture.riscv64: 'riscv64-linux-gnu',
   };
 
-  static const clangWindowsTargetFlags = {
+  static final clangWindowsTargetFlags = {
     Architecture.arm64: 'arm64-pc-windows-msvc',
     Architecture.ia32: 'i386-pc-windows-msvc',
     Architecture.x64: 'x86_64-pc-windows-msvc',
   };
 
-  static const clTargetFlags = {
+  static final clTargetFlags = {
     Architecture.arm64: 'ARM64',
     Architecture.ia32: 'X86',
     Architecture.x64: 'X64',
   };
 
-  static const defaultCppLinkStdLib = {
+  static final defaultCppLinkStdLib = {
     OS.android: 'c++_shared',
     OS.fuchsia: 'c++',
     OS.iOS: 'c++',
@@ -549,13 +572,13 @@ class RunCBuilder {
     OS.macOS: 'c++',
   };
 
-  static const _clangSanitizers = {
+  static final _clangSanitizers = {
     Sanitizer.asan: '-fsanitize=address',
     Sanitizer.msan: '-fsanitize=memory',
     Sanitizer.tsan: '-fsanitize=thread',
   };
 
-  static const _msvcSanitizers = {
+  static final _msvcSanitizers = {
     Sanitizer.asan: '/fsanitize=address',
   };
 }

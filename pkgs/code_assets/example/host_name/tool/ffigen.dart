@@ -6,16 +6,19 @@ import 'dart:io';
 
 import 'package:ffigen/ffigen.dart';
 
-void main() {
+Future<void> main() async {
   final packageRoot = Platform.script.resolve('../');
-  final functions = Functions.includeSet({'gethostname'});
   final FfiGenerator generator;
   if (Platform.isWindows) {
     generator = FfiGenerator(
       input: Input(entryPoints: [packageRoot.resolve('src/windows.h')]),
-      functions: functions,
+      visitors: [
+        Visitor(func: (node) => node.isIncluded = node.name == 'gethostname'),
+      ],
       output: Output(
-        dartFile: packageRoot.resolve('lib/src/third_party/windows.dart'),
+        dart: DartOutput(
+          path: packageRoot.resolve('lib/src/third_party/windows.dart'),
+        ),
         preamble: '''
 // This file includes parts which are Copyright (c) 1982-1986 Regents
 // of the University of California.  All rights reserved.  The
@@ -27,9 +30,13 @@ void main() {
   } else {
     generator = FfiGenerator(
       input: Input(entryPoints: [packageRoot.resolve('src/unix.h')]),
-      functions: functions,
+      visitors: [
+        Visitor(func: (node) => node.isIncluded = node.name == 'gethostname'),
+      ],
       output: Output(
-        dartFile: packageRoot.resolve('lib/src/third_party/unix.dart'),
+        dart: DartOutput(
+          path: packageRoot.resolve('lib/src/third_party/unix.dart'),
+        ),
         preamble: '''
 // Copyright (C) 1991-2022 Free Software Foundation, Inc.
 // This file is part of the GNU C Library.
@@ -51,5 +58,5 @@ void main() {
       ),
     );
   }
-  generator.generate();
+  await generator.generate();
 }

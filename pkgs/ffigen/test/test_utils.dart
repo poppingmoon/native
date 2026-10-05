@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
@@ -29,7 +30,10 @@ Context testContext([FfiGenerator? generator]) {
   )..createSync(recursive: true)).createTempSync();
   return Context(
     createTestLogger(),
-    generator ?? FfiGenerator(output: Output(dartFile: Uri.file('unused'))),
+    generator ??
+        FfiGenerator(
+          output: Output(dart: DartOutput(path: Uri.file('unused'))),
+        ),
     tmpDir: tmpDir.path,
   );
 }
@@ -77,6 +81,7 @@ extension LibraryTestExt on Library {
     context.libs.forceFillForTesting();
     context.rootScope.fillNames();
     context.rootObjCScope.fillNames();
+    context.rootCppScope.fillNames();
   }
 }
 
@@ -91,6 +96,24 @@ class _FakeRenamer extends Visitation {
         ..fillNames();
     }
     node.visitChildren(visitor);
+  }
+
+  @override
+  void visitFunc(Func node) {
+    node.fillFuncVarSymbol();
+    visitBinding(node);
+  }
+
+  @override
+  void visitObjCInterface(ObjCInterface node) {
+    if (!node.generateAsStub) node.fillClassObject();
+    visitBinding(node);
+  }
+
+  @override
+  void visitObjCProtocol(ObjCProtocol node) {
+    if (!node.generateAsStub) node.fillProtocolPointer();
+    visitBinding(node);
   }
 }
 
@@ -107,7 +130,7 @@ String _normalizeGeneratedCode(
 /// Generates actual file using library and tests using [expect] with expected.
 ///
 /// This will not delete the actual debug file incase [expect] throws an error.
-void matchLibraryWithExpected(
+Future<void> matchLibraryWithExpected(
   Context context,
   Library library,
   String pathForActual,
@@ -115,12 +138,12 @@ void matchLibraryWithExpected(
   String Function(String)? codeNormalizer,
   bool format = true,
   bool Function(String, String)? verify,
-}) {
-  matchFileWithExpected(
+}) async {
+  await matchFileWithExpected(
     context: context,
     pathForActual: pathForActual,
     pathToExpected: pathToExpected,
-    fileWriter: (File file) => library.generateFile(file, format: format),
+    fileWriter: (File file, _) => library.generateFile(file, format: format),
     codeNormalizer: codeNormalizer,
     verify: verify,
   );
@@ -129,19 +152,19 @@ void matchLibraryWithExpected(
 /// Generates actual file using library and tests using [expect] with expected.
 ///
 /// This will not delete the actual debug file incase [expect] throws an error.
-void matchLibrarySymbolFileWithExpected(
+Future<void> matchLibrarySymbolFileWithExpected(
   Context context,
   Library library,
   String pathForActual,
   List<String> pathToExpected,
   String importPath, {
   bool Function(String, String)? verify,
-}) {
-  matchFileWithExpected(
+}) async {
+  await matchFileWithExpected(
     context: context,
     pathForActual: pathForActual,
     pathToExpected: pathToExpected,
-    fileWriter: (File file) {
+    fileWriter: (File file, _) {
       if (!library.writer.canGenerateSymbolOutput) library.generate();
       library.generateSymbolOutputFile(file, importPath);
     },
@@ -152,18 +175,19 @@ void matchLibrarySymbolFileWithExpected(
 /// Generates ObjC file using library and tests using [expect] with expected.
 ///
 /// This will not delete the actual ObjC file incase [expect] throws an error.
-void matchObjCFileWithExpected(
+Future<void> matchObjCFileWithExpected(
   Context context,
   Library library,
   String pathForActual,
   List<String> pathToExpected, {
   bool Function(String, String)? verify,
-}) {
-  matchFileWithExpected(
+}) async {
+  await matchFileWithExpected(
     context: context,
     pathForActual: pathForActual,
     pathToExpected: pathToExpected,
-    fileWriter: (File file) => library.generateObjCFile(file),
+    fileWriter: (File file, String expectedPath) =>
+        library.generateObjCFile(file, headerPath: expectedPath),
     verify: verify,
   );
 }
@@ -171,18 +195,19 @@ void matchObjCFileWithExpected(
 /// Generates C++ file using library and tests using [expect] with expected.
 ///
 /// This will not delete the actual C++ file incase [expect] throws an error.
-void matchCppFileWithExpected(
+Future<void> matchCppFileWithExpected(
   Context context,
   Library library,
   String pathForActual,
   List<String> pathToExpected, {
   bool Function(String, String)? verify,
-}) {
-  matchFileWithExpected(
+}) async {
+  await matchFileWithExpected(
     context: context,
     pathForActual: pathForActual,
     pathToExpected: pathToExpected,
-    fileWriter: (File file) => library.generateCppFile(file),
+    fileWriter: (File file, String expectedPath) =>
+        library.generateCppFile(file, headerPath: expectedPath),
     verify: verify,
   );
 }
@@ -191,7 +216,7 @@ void matchCppFileWithExpected(
 /// [expect] with expected.
 ///
 /// This will not delete the actual debug file incase [expect] throws an error.
-void matchRecordUseMappingWithExpected(
+Future<void> matchRecordUseMappingWithExpected(
   Context context,
   Library library,
   String pathForActual,
@@ -199,12 +224,12 @@ void matchRecordUseMappingWithExpected(
   String Function(String)? codeNormalizer,
   bool format = true,
   bool Function(String, String)? verify,
-}) {
-  matchFileWithExpected(
+}) async {
+  await matchFileWithExpected(
     context: context,
     pathForActual: pathForActual,
     pathToExpected: pathToExpected,
-    fileWriter: (File file) =>
+    fileWriter: (File file, _) =>
         library.generateRecordUseMappingFile(file, format: format),
     codeNormalizer: codeNormalizer,
     verify: verify,
@@ -224,14 +249,15 @@ String configPath(String directory, String file) =>
 /// file content at [pathToExpected].
 ///
 /// This will not delete the actual debug file incase [expect] throws an error.
-void matchFileWithExpected({
+Future<void> matchFileWithExpected({
   required Context context,
   required String pathForActual,
   required List<String> pathToExpected,
-  required void Function(File file) fileWriter,
+  required FutureOr<void> Function(File actualFile, String expectedPath)
+  fileWriter,
   String Function(String)? codeNormalizer,
   bool Function(String expected, String actual)? verify,
-}) {
+}) async {
   final expectedPath = path.joinAll([packagePathForTests, ...pathToExpected]);
   final expectedFile = File(expectedPath);
 
@@ -241,22 +267,7 @@ void matchFileWithExpected({
 
   verify ??= (expected, actual) => expected == actual;
 
-  // Generate the actual file in the expected location so that the generated
-  // relative import paths are correct. In case the expected and actual files
-  // have the same name, move the expected file to a backup location first.
-  final backupFile = File(path.join(tmpDirPath, '$pathForActual.backup'));
-  if (expectedFile.existsSync()) {
-    expectedFile.renameSync(backupFile.path);
-  }
-  fileWriter(expectedFile);
-
-  // Move the expected and actual files to their correct locations.
-  if (expectedFile.existsSync()) {
-    expectedFile.renameSync(actualPath);
-  }
-  if (backupFile.existsSync()) {
-    backupFile.renameSync(expectedPath);
-  }
+  await fileWriter(actualFile, expectedPath);
 
   if (updateExpectations) {
     print('Updating expectations: ${path.relative(expectedPath)}');

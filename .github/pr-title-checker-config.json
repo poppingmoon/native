@@ -3,6 +3,7 @@
         "prefixes": [
             "[code_assets] ",
             "[data_assets] ",
+            "[web_assets] ",
             "[doc] ",
             "[ffi] ",
             "[ffigen] ",
@@ -13,7 +14,6 @@
             "[jni_flutter] ",
             "[jnigen] ",
             "[json_syntax_generator] ",
-            "[native_doc_dartifier] ",
             "[native_test_helpers] ",
             "[native_toolchain_c] ",
             "[objective_c] ",

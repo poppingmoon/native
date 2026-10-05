@@ -11,20 +11,22 @@ import 'package:test/test.dart';
 
 import 'test_util/test_util.dart';
 
-Config _getConfig(Uri output, bool generateStubs) {
+JniGenerator _getConfig(Uri output, bool generateStubs) {
   final testRoot = join('test', 'stub_test');
   final javaPath = join(testRoot, 'java');
-  return Config(
-    sourcePath: [Uri.directory(javaPath)],
-    classPath: [Uri.directory(javaPath)],
-    classes: ['com.example.A', 'com.example.C'],
-    outputConfig: OutputConfig(
-      dartConfig: DartCodeOutputConfig(
+  return JniGenerator(
+    input: Input(
+      sourcePath: [Uri.directory(javaPath)],
+      classPath: [Uri.directory(javaPath)],
+      classes: ['com.example.A', 'com.example.C'],
+    ),
+    output: Output(
+      dart: DartOutput(
         path: output,
         structure: OutputStructure.singleFile,
       ),
+      generateStubs: generateStubs,
     ),
-    generateStubs: generateStubs,
   );
 }
 
@@ -43,7 +45,7 @@ void main() async {
 
     test('Generate bindings with stubs disabled', () async {
       final output = tempDir.uri.resolve('bindings_no_stubs.dart');
-      await generateJniBindings(_getConfig(output, false));
+      await _getConfig(output, false).generate();
       final analyzeResult =
           Process.runSync(dartExecutable, ['analyze', output.toFilePath()]);
       expect(analyzeResult.exitCode, 0, reason: analyzeResult.stdout as String);
@@ -64,7 +66,7 @@ void main() async {
 
     test('Generate bindings with stubs enabled', () async {
       final output = tempDir.uri.resolve('bindings_stubs.dart');
-      await generateJniBindings(_getConfig(output, true));
+      await _getConfig(output, true).generate();
       final analyzeResult =
           Process.runSync(dartExecutable, ['analyze', output.toFilePath()]);
       expect(analyzeResult.exitCode, 0, reason: analyzeResult.stdout as String);

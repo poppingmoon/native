@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:cli_util/cli_logging.dart' show Ansi;
 import 'package:logging/logging.dart';
 
-import 'config_provider.dart' show FfiGenerator;
+import 'config_provider/config.dart';
 import 'context.dart';
 import 'header_parser.dart' show parse;
 import 'logger.dart';
@@ -19,7 +19,7 @@ extension FfiGenGenerator on FfiGenerator {
   ///
   /// If provided, uses [logger] to output logs. Otherwise, uses a default
   /// logger that streams [Level.WARNING] to stdout and higher levels to stderr.
-  void generate({Logger? logger, Uri? libclangDylib}) {
+  Future<void> generate({Logger? logger, Uri? libclangDylib}) async {
     logger ??= createDefaultLogger();
     final context = Context(logger, this, libclangDylib: libclangDylib);
 
@@ -27,8 +27,8 @@ extension FfiGenGenerator on FfiGenerator {
     final library = parse(context);
 
     // Generate files for the parsed bindings.
-    final gen = File(output.dartFile.toFilePath());
-    library.generateFile(gen, format: output.format);
+    final gen = File(output.dart.path.toFilePath());
+    await library.generateFile(gen, format: output.format);
     logger.info(
       _successPen('Finished, Bindings generated in ${gen.absolute.path}'),
     );
@@ -55,7 +55,7 @@ extension FfiGenGenerator on FfiGenerator {
     final recordUseMappingFile = output.recordUseMapping;
     if (recordUseMappingFile != null) {
       final recordUseMappingGen = File(recordUseMappingFile.toFilePath());
-      if (library.generateRecordUseMappingFile(
+      if (await library.generateRecordUseMappingFile(
         recordUseMappingGen,
         format: output.format,
       )) {

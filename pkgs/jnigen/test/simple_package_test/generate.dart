@@ -7,7 +7,6 @@ import 'dart:io';
 import 'package:jni_util/jni_util.dart' as jni_util;
 import 'package:jnigen/jnigen.dart';
 import 'package:jnigen/src/logging/logging.dart';
-import 'package:logging/logging.dart';
 import 'package:path/path.dart';
 
 const testName = 'simple_package_test';
@@ -83,28 +82,38 @@ void compileJavaSources(String workingDir, List<String> files) async {
   }
 }
 
-Config getConfig({SummarizerBackend backend = SummarizerBackend.asm}) {
+JniGenerator getConfig({SummarizerBackend backend = SummarizerBackend.asm}) {
   compileJavaSources(javaPath, javaFiles);
   final dartWrappersRoot = Uri.directory(
     join(testRoot, 'bindings'),
   );
-  final config = Config(
-    sourcePath: [Uri.directory(javaPath)],
-    classPath: [Uri.directory(javaPath)],
-    summarizerOptions: SummarizerOptions(backend: backend),
-    classes: [
-      'com.github.dart_lang.jnigen.simple_package',
-      'com.github.dart_lang.jnigen.pkg2',
-      'com.github.dart_lang.jnigen.enums',
-      'com.github.dart_lang.jnigen.generics',
-      'com.github.dart_lang.jnigen.interfaces',
-      'com.github.dart_lang.jnigen.inheritance',
-      'com.github.dart_lang.jnigen.annotations',
-      'com.github.dart_lang.jnigen.regressions',
-    ],
-    logLevel: Level.INFO,
-    nonNullAnnotations: ['com.github.dart_lang.jnigen.annotations.NotNull'],
-    nullableAnnotations: ['com.github.dart_lang.jnigen.annotations.Nullable'],
+  final config = JniGenerator(
+    input: Input(
+      sourcePath: [Uri.directory(javaPath)],
+      classPath: [Uri.directory(javaPath)],
+      backend: backend,
+      classes: [
+        'com.github.dart_lang.jnigen.simple_package',
+        'com.github.dart_lang.jnigen.pkg2',
+        'com.github.dart_lang.jnigen.enums',
+        'com.github.dart_lang.jnigen.generics',
+        'com.github.dart_lang.jnigen.interfaces',
+        'com.github.dart_lang.jnigen.inheritance',
+        'com.github.dart_lang.jnigen.annotations',
+        'com.github.dart_lang.jnigen.regressions',
+      ],
+    ),
+    output: Output(
+      dart: DartOutput(
+        path: dartWrappersRoot.resolve('simple_package.dart'),
+        structure: OutputStructure.singleFile,
+      ),
+      preamble: preamble,
+    ),
+    nullability: const NullabilityAnnotations(
+      nonNull: ['com.github.dart_lang.jnigen.annotations.NotNull'],
+      nullable: ['com.github.dart_lang.jnigen.annotations.Nullable'],
+    ),
     customClassBody: {
       'com.github.dart_lang.jnigen.interfaces.MyConsumer': r'''
   static core$_.Map<core$_.int, $MyConsumer> get $impls => _$impls;
@@ -116,17 +125,10 @@ Config getConfig({SummarizerBackend backend = SummarizerBackend.asm}) {
   static core$_.Map<core$_.int, $MyRunnable> get $impls => _$impls;
 '''
     },
-    outputConfig: OutputConfig(
-      dartConfig: DartCodeOutputConfig(
-        path: dartWrappersRoot.resolve('simple_package.dart'),
-        structure: OutputStructure.singleFile,
-      ),
-    ),
-    preamble: preamble,
   );
   return config;
 }
 
 void main() async {
-  await generateJniBindings(getConfig());
+  await getConfig().generate();
 }

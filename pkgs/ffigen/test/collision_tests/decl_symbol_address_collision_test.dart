@@ -4,6 +4,7 @@
 
 import 'package:ffigen/src/code_generator.dart';
 import 'package:ffigen/src/config_provider/config.dart';
+import 'package:ffigen/src/config_provider/public_ast.dart' as public_ast;
 import 'package:ffigen/src/header_parser/parser.dart';
 import 'package:test/test.dart';
 
@@ -16,15 +17,19 @@ void main() {
       final context = testContext(
         FfiGenerator(
           output: Output(
-            dartFile: Uri.file('unused'),
+            dart: DartOutput(path: Uri.file('unused')),
             style: const DynamicLibraryBindings(wrapperName: 'Bindings'),
           ),
-          functions: Functions.includeAll,
-          structs: Structs.includeAll,
-          enums: Enums.includeAll,
-          globals: Globals.includeAll,
-          macros: Macros.includeAll,
-          typedefs: Typedefs.includeAll,
+          visitors: [
+            public_ast.Visitor(
+              func: (node) => node.isIncluded = true,
+              struct: (node) => node.isIncluded = true,
+              enumClass: (node) => node.isIncluded = true,
+              global: (node) => node.isIncluded = true,
+              macroConstant: (node) => node.isIncluded = true,
+              typealias: (node) => node.isIncluded = .always,
+            ),
+          ],
         ),
       );
       actual = Library(
@@ -38,7 +43,7 @@ void main() {
             name: '_library',
             returnType: NativeType(SupportedNativeType.voidType),
             exposeSymbolAddress: true,
-            exposeFunctionTypedefs: true,
+            generateTypedefs: true,
           ),
           Func(
             name: '_SymbolAddresses_1',
@@ -48,9 +53,9 @@ void main() {
         ], context),
       );
     });
-    test('declaration and symbol address conflict', () {
+    test('declaration and symbol address conflict', () async {
       final context = testContext();
-      matchLibraryWithExpected(
+      await matchLibraryWithExpected(
         context,
         actual,
         'collision_test_decl_symbol_address_collision_output.dart',

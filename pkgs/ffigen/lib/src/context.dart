@@ -22,15 +22,15 @@ class Context {
   final CursorIndex cursorIndex;
   final bindingsIndex = BindingsIndex();
   final savedMacros = <String, Macro>{};
-  final unnamedEnumConstants = <Constant>[];
+  final unnamedEnumConstants = <UnnamedEnumConstant>[];
   late final ObjCBuiltInFunctions objCBuiltInFunctions;
   bool hasSourceErrors = false;
   final reportedCommentRanges = <((String, int), (String, int))>{};
   final libs = LibraryImports();
-  late final compilerOpts =
-      config.input.compilerOptions ?? defaultCompilerOpts(logger);
+  late final compilerOpts = computeCompilerOpts(config: config, logger: logger);
   final Scope rootScope = Scope.createRoot('root');
   final Scope rootObjCScope = Scope.createRoot('objc_root');
+  final Scope rootCppScope = Scope.createRoot('cpp_root');
   late final ExtraSymbols extraSymbols;
   final String tmpDir;
 

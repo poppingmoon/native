@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:jnigen/src/config/config.dart';
 import 'package:jnigen/src/logging/logging.dart';
-import 'package:logging/logging.dart';
 import 'package:path/path.dart';
 
 import 'test_util.dart';
@@ -33,31 +32,27 @@ final javaFiles = findFilesWithSuffix(simplePackageDir, '.java');
 /// All Java classes in simple_package_test/java
 final javaClasses = javaFiles.map(getClassNameFromPath).toList();
 
-// Remove individual class listings from one package,
-// and add the package name instead, for testing.
-
-const removalPackageForSummaryTests = 'com.github.dart_lang.jnigen.pkg2';
-
-/// List of FQNs passed to summarizer for simple_package_test.
-final summarizerClassesSpec = [
-  ...javaClasses.where((e) => !e.startsWith('$removalPackageForSummaryTests.')),
-  removalPackageForSummaryTests,
-];
-
-Config getSummaryGenerationConfig(
+JniGenerator getSummaryGenerationConfig(
     {List<String>? sourcePath, List<String>? classPath}) {
-  return Config(
-    outputConfig: OutputConfig(
-      dartConfig: DartCodeOutputConfig(
+  const removalPackageForSummaryTests = 'com.github.dart_lang.jnigen.pkg2';
+  return JniGenerator(
+    input: Input(
+      // Remove individual class listings from one package,
+      // and add the package name instead, for testing.
+      classes: [
+        ...javaClasses
+            .where((e) => !e.startsWith('$removalPackageForSummaryTests.')),
+        removalPackageForSummaryTests,
+      ],
+      sourcePath: sourcePath?.map(Uri.file).toList() ?? const [],
+      classPath: classPath?.map(Uri.file).toList() ?? const [],
+    ),
+    output: Output(
+      dart: DartOutput(
         path: Uri.file('unused.dart'),
         structure: OutputStructure.singleFile,
       ),
     ),
-    // Make a defensive copy of class list, if some test mutates the list...
-    classes: summarizerClassesSpec.toList(),
-    sourcePath: sourcePath?.map(Uri.file).toList(),
-    classPath: classPath?.map(Uri.file).toList(),
-    logLevel: Level.WARNING,
   );
 }
 

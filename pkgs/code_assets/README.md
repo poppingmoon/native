@@ -1,5 +1,5 @@
 [![package:code_assets](https://github.com/dart-lang/native/actions/workflows/native.yaml/badge.svg)](https://github.com/dart-lang/native/actions/workflows/native.yaml)
-[![Coverage Status](https://coveralls.io/repos/github/dart-lang/native/badge.svg?branch=main)](https://coveralls.io/github/dart-lang/native?branch=main)
+[![Coverage Status](https://codecov.io/gh/dart-lang/native/branch/main/graph/badge.svg?component=code_assets)](https://app.codecov.io/gh/dart-lang/native)
 [![pub package](https://img.shields.io/pub/v/code_assets.svg)](https://pub.dev/packages/code_assets)
 [![package publisher](https://img.shields.io/pub/publisher/code_assets.svg)](https://pub.dev/packages/code_assets/publisher)
 
@@ -43,24 +43,36 @@ void main(List<String> args) async {
 ```
 
 When compiling C, C++ or Objective-C code from source, consider using
-[`package:native_toolchain_c`](https://pub.dev/packages/native_toolchain_c):
+[`package:native_toolchain_c`](https://pub.dev/packages/native_toolchain_c)
+with a build hook and a link hook. First, define the C library specification in
+a shared file:
 
-<!-- file://./example/sqlite_no_link/hook/build.dart -->
+<!-- file://./example/sqlite/lib/src/c_library.dart -->
 ```dart
-import 'package:code_assets/code_assets.dart';
-import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 
-final builder = CBuilder.library(
+/// The C build specification for the sqlite library.
+///
+/// It is used by the build and link hooks in the `hook/` directory.
+final cLibrary = CLibrary(
   name: 'sqlite3',
   assetName: 'src/third_party/sqlite3.g.dart',
   sources: ['third_party/sqlite/sqlite3.c'],
 );
+```
+
+Next, compile the library in the build hook:
+
+<!-- file://./example/sqlite/hook/build.dart -->
+```dart
+import 'package:code_assets/code_assets.dart';
+import 'package:hooks/hooks.dart';
+import 'package:sqlite/src/c_library.dart';
 
 void main(List<String> args) async {
   await build(args, (input, output) async {
     if (input.config.buildCodeAssets) {
-      await builder.run(
+      await cLibrary.build(
         input: input,
         output: output,
         defines: {
@@ -70,6 +82,31 @@ void main(List<String> args) async {
         },
       );
     }
+  });
+}
+```
+
+Finally, tree-shake and link the library in the link hook:
+
+<!-- file://./example/sqlite/hook/link.dart -->
+```dart
+import 'package:hooks/hooks.dart';
+import 'package:native_toolchain_c/native_toolchain_c.dart';
+import 'package:record_use/record_use.dart';
+import 'package:sqlite/src/c_library.dart';
+import 'package:sqlite/src/third_party/record_use_mapping.dart';
+
+void main(List<String> arguments) async {
+  await link(arguments, (input, output) async {
+    await cLibrary.link(
+      input: input,
+      output: output,
+      linkerOptions: LinkerOptions.treeshake(
+        symbolsToKeep: input.recordedUses?.calls.keys.cast<Method>().map(
+          (e) => recordUseMapping[e.name]!,
+        ),
+      ),
+    );
   });
 }
 ```
@@ -112,6 +149,23 @@ void main(List<String> args) async {
 ```
 
 See the full example in [example/host_name/](example/host_name/).
+
+### Custom Operating Systems and Architectures
+
+SDK authors can define custom OSes and Architectures that they support in a helper package like:
+
+<!-- file://./../hooks_runner/test/build_runner/custom_os_arch_test.dart -->
+```dart
+extension CustomOS on OS {
+  static final ohos = OS.fromString('ohos');
+}
+
+extension CustomArchitecture on Architecture {
+  static final mips = Architecture.fromString('mips');
+}
+```
+
+The users of those SDKs can import this helper package to use the custom OSes and Architectures in their build hooks.
 
 For more information see [dart.dev/tools/hooks](https://dart.dev/tools/hooks).
 

@@ -4,11 +4,19 @@
 
 import 'dart:io';
 
-import 'package:ffigen/src/config_provider/config.dart';
+import 'package:ffigen/ffigen.dart';
 import 'package:path/path.dart' as path;
 import 'package:test/test.dart';
 
 import '../test_utils.dart';
+import 'cpp_class_config.dart' as cpp_class_config;
+import 'cpp_extern_c_config.dart' as cpp_extern_c_config;
+import 'cpp_filter_rename_config.dart' as cpp_filter_rename_config;
+import 'cpp_inheritance_config.dart' as cpp_inheritance_config;
+import 'cpp_namespace_enum_config.dart' as cpp_namespace_enum_config;
+import 'cpp_pod_config.dart' as cpp_pod_config;
+import 'cpp_scoped_struct_config.dart' as cpp_scoped_struct_config;
+import 'memory_edge_cases_config.dart' as memory_edge_cases_config;
 import 'util.dart';
 
 void main() {
@@ -29,50 +37,26 @@ void main() {
             .toList()
           ..sort();
 
+    final packageRoot = Uri.file(path.join(packagePathForTests, ''));
     final configs = <String, FfiGenerator>{
-      'cpp_class': FfiGenerator(
-        output: Output(
-          dartFile: Uri.file('cpp_class_test_bindings.dart'),
-          style: const NativeExternalBindings(
-            assetId: 'package:ffigen/cpp_test',
-          ),
-        ),
-        input: Input(
-          entryPoints: [
-            Uri.file(path.join(testDir.path, 'cpp_class_test.h')),
-            Uri.file(path.join(testDir.path, 'finalizer_test_subject.h')),
-          ],
-          compilerOptions: ['-x', 'c++'],
-        ),
-        cpp: Cpp(
-          classes: CppClasses.includeSet({'Animal', 'FinalizerTestSubject'}),
-        ),
-      ),
-      'memory_edge_cases': FfiGenerator(
-        output: Output(
-          dartFile: Uri.file('memory_edge_cases_bindings.dart'),
-          style: const NativeExternalBindings(
-            assetId: 'package:ffigen/cpp_test',
-          ),
-        ),
-        input: Input(
-          entryPoints: [
-            Uri.file(path.join(testDir.path, 'memory_edge_cases.h')),
-          ],
-          compilerOptions: ['-x', 'c++'],
-        ),
-        cpp: Cpp(classes: CppClasses.includeSet({'Node', 'NodeManager'})),
-      ),
+      'cpp_class': cpp_class_config.getConfig(packageRoot),
+      'cpp_extern_c': cpp_extern_c_config.getConfig(packageRoot),
+      'cpp_filter_rename': cpp_filter_rename_config.getConfig(packageRoot),
+      'cpp_pod': cpp_pod_config.getConfig(packageRoot),
+      'memory_edge_cases': memory_edge_cases_config.getConfig(packageRoot),
+      'cpp_inheritance': cpp_inheritance_config.getConfig(packageRoot),
+      'cpp_namespace_enum': cpp_namespace_enum_config.getConfig(packageRoot),
+      'cpp_scoped_struct': cpp_scoped_struct_config.getConfig(packageRoot),
     };
 
     for (final testFile in testFiles) {
       final configName = testFile.replaceFirst('_test.dart', '');
-      test('verifyBindings for $testFile', () {
+      test('verifyBindings for $testFile', () async {
         final config = configs[configName];
         if (config == null) {
           fail('No FfiGenerator config registered for $testFile in `configs`.');
         }
-        verifyBindings(config);
+        await verifyBindings(config);
       });
     }
   });

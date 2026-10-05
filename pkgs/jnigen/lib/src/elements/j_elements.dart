@@ -18,10 +18,10 @@ abstract base class Visitor {
   const Visitor.base();
 
   factory Visitor({
-    void Function(ClassDecl node)? visitClass,
-    void Function(Method node)? visitMethod,
-    void Function(Field node)? visitField,
-    void Function(Param node)? visitParam,
+    void Function(ClassDecl node)? classDecl,
+    void Function(Method node)? method,
+    void Function(Field node)? field,
+    void Function(Param node)? param,
   }) = _VisitorImpl;
 
   /// Visits a class declaration.
@@ -39,39 +39,39 @@ abstract base class Visitor {
 
 final class _VisitorImpl extends Visitor {
   const _VisitorImpl({
-    void Function(ClassDecl node)? visitClass,
-    void Function(Method node)? visitMethod,
-    void Function(Field node)? visitField,
-    void Function(Param node)? visitParam,
-  })  : _visitClass = visitClass,
-        _visitMethod = visitMethod,
-        _visitField = visitField,
-        _visitParam = visitParam,
+    void Function(ClassDecl node)? classDecl,
+    void Function(Method node)? method,
+    void Function(Field node)? field,
+    void Function(Param node)? param,
+  })  : _classDecl = classDecl,
+        _method = method,
+        _field = field,
+        _param = param,
         super.base();
 
-  final void Function(ClassDecl node)? _visitClass;
-  final void Function(Method node)? _visitMethod;
-  final void Function(Field node)? _visitField;
-  final void Function(Param node)? _visitParam;
+  final void Function(ClassDecl node)? _classDecl;
+  final void Function(Method node)? _method;
+  final void Function(Field node)? _field;
+  final void Function(Param node)? _param;
 
   @override
   void visitClass(ClassDecl c) {
-    _visitClass?.call(c);
+    _classDecl?.call(c);
   }
 
   @override
   void visitMethod(Method method) {
-    _visitMethod?.call(method);
+    _method?.call(method);
   }
 
   @override
   void visitField(Field field) {
-    _visitField?.call(field);
+    _field?.call(field);
   }
 
   @override
   void visitParam(Param parameter) {
-    _visitParam?.call(parameter);
+    _param?.call(parameter);
   }
 }
 
@@ -97,10 +97,10 @@ class ClassDecl implements _Element {
   /// The binary name of the class (e.g., "java.lang.Object").
   String get binaryName => _classDecl.binaryName;
 
-  /// Whether this class should be excluded from code generation.
-  bool get isExcluded => _classDecl.isExcluded;
-  set isExcluded(bool value) => _classDecl.bindingMode =
-      value ? ast.BindingMode.excluded : ast.BindingMode.full;
+  /// Whether this class should be included in code generation.
+  bool get isIncluded => _classDecl.isIncluded;
+  set isIncluded(bool value) => _classDecl.bindingMode =
+      value ? ast.BindingMode.full : ast.BindingMode.excluded;
 
   /// The name of the class that will appear in generated code, subject to
   /// renaming to resolve conflicts (eg with keywords or other names).
@@ -110,10 +110,19 @@ class ClassDecl implements _Element {
   /// The original name of the class in Java.
   String get originalName => _classDecl.name;
 
+  /// The custom name of the mixin generated for implementing this Java
+  /// interface
+  ///
+  /// If null, the default generated name is used.
+  String? get interfaceMixinName => _classDecl.userDefinedInterfaceMixinName;
+
+  set interfaceMixinName(String? newName) =>
+      _classDecl.userDefinedInterfaceMixinName = newName;
+
   @override
   void accept(Visitor visitor) {
     visitor.visitClass(this);
-    if (_classDecl.isExcluded) return;
+    if (!_classDecl.isIncluded) return;
     for (final method in _classDecl.methods) {
       Method(method).accept(visitor);
     }
@@ -129,9 +138,9 @@ class Method implements _Element {
 
   final ast.Method _method;
 
-  /// Whether this method should be excluded from code generation.
-  bool get isExcluded => _method.userDefinedIsExcluded;
-  set isExcluded(bool value) => _method.userDefinedIsExcluded = value;
+  /// Whether this method should be included in code generation.
+  bool get isIncluded => _method.userDefinedIsIncluded;
+  set isIncluded(bool value) => _method.userDefinedIsIncluded = value;
 
   /// The name of the method that will appear in generated code, subject to
   /// renaming to resolve conflicts (eg with keywords or other names).
@@ -147,7 +156,7 @@ class Method implements _Element {
   @override
   void accept(Visitor visitor) {
     visitor.visitMethod(this);
-    if (_method.userDefinedIsExcluded) return;
+    if (!_method.userDefinedIsIncluded) return;
     for (final param in _method.params) {
       Param(param).accept(visitor);
     }
@@ -180,9 +189,9 @@ class Field implements _Element {
 
   final ast.Field _field;
 
-  /// Whether this field should be excluded from code generation.
-  bool get isExcluded => _field.isExcluded;
-  set isExcluded(bool value) => _field.isExcluded = value;
+  /// Whether this field should be included in code generation.
+  bool get isIncluded => _field.isIncluded;
+  set isIncluded(bool value) => _field.isIncluded = value;
 
   /// The name of the field that will appear in generated code, subject to
   /// renaming to resolve conflicts (eg with keywords or other names).

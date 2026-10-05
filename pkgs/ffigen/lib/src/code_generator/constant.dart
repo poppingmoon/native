@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import '../config_provider/public_ast.dart' as public_ast;
 import '../header_parser/sub_parsers/api_availability.dart';
 import '../visitor/ast.dart';
 import 'binding.dart';
@@ -10,18 +11,20 @@ import 'scope.dart';
 import 'utils.dart';
 import 'writer.dart';
 
-/// A simple Constant.
+/// Base class for constants.
 ///
 /// Expands to -
+/// <!-- no-source-file -->
 /// ```dart
 /// const <type> <name> = <rawValue>;
 /// ```
 ///
 /// Example -
+/// <!-- no-source-file -->
 /// ```dart
 /// const int name = 10;
 /// ```
-class Constant extends NoLookUpBinding {
+abstract class Constant extends NoLookUpBinding {
   /// The rawType is pasted as it is. E.g 'int', 'String', 'double'
   final String rawType;
 
@@ -31,6 +34,8 @@ class Constant extends NoLookUpBinding {
   final String rawValue;
 
   final ApiAvailability? apiAvailability;
+
+  bool isIncluded = false;
 
   Constant({
     super.usr,
@@ -59,9 +64,6 @@ class Constant extends NoLookUpBinding {
       string: s.toString(),
     );
   }
-
-  @override
-  void visit(Visitation visitation) => visitation.visitConstant(this);
 }
 
 /// A [Constant] defined by an unnamed enum.
@@ -75,6 +77,9 @@ class UnnamedEnumConstant extends Constant {
     required super.rawValue,
     super.apiAvailability,
   });
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.UnnamedEnumConstant(this);
 
   @override
   void visit(Visitation visitation) =>
@@ -92,6 +97,9 @@ class MacroConstant extends Constant {
     required super.rawValue,
     super.apiAvailability,
   });
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.MacroConstant(this);
 
   @override
   void visit(Visitation visitation) => visitation.visitMacroConstant(this);

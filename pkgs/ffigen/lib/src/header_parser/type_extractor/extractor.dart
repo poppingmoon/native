@@ -44,6 +44,26 @@ Type getCodeGenType(
     return getCodeGenType(context, clang.clang_Type_getNamedType(cxtype));
   }
 
+  // Handle C++ templates like std::unique_ptr.
+  if (context.config.cpp != null) {
+    final numTemplateArgs = clang.clang_Type_getNumTemplateArguments(cxtype);
+    if (numTemplateArgs >= 1) {
+      final declCursor = clang.clang_getTypeDeclaration(cxtype);
+      final isStdUniquePtr =
+          declCursor.spelling() == 'unique_ptr' &&
+          declCursor.usr().startsWith('c:@N@std@');
+      if (isStdUniquePtr) {
+        final spelling = cxtype.spelling();
+        return _extractUniquePtrType(
+          context,
+          cxtype,
+          numTemplateArgs,
+          spelling,
+        );
+      }
+    }
+  }
+
   // These basic Objective C types skip the cache, and are conditional on the
   // language flag.
   if (context.config.objectiveC != null) {
@@ -132,9 +152,20 @@ Type getCodeGenType(
       return BooleanType();
     case clang_types.CXTypeKind.CXType_Attributed:
     case clang_types.CXTypeKind.CXType_Unexposed:
+      // Attributed types carry the type they modify; other unexposed types
+      // (e.g. a using-declared C++ type) have none, so use the canonical type.
+      var innerCxType = clang.clang_Type_getModifiedType(cxtype);
+      if (innerCxType.kind == clang_types.CXTypeKind.CXType_Invalid) {
+        final canonical = clang.clang_getCanonicalType(cxtype);
+        // Recursion guard: a type that is already canonical (e.g. a dependent
+        // template type) would otherwise resolve to itself forever.
+        if (clang.clang_equalTypes(canonical, cxtype) == 0) {
+          innerCxType = canonical;
+        }
+      }
       final innerType = getCodeGenType(
         context,
-        clang.clang_Type_getModifiedType(cxtype),
+        innerCxType,
         originalCursor: originalCursor,
       );
       final isNullable =
@@ -153,7 +184,7 @@ Type getCodeGenType(
       final imported = context.config.importType(
         Declaration(usr: '', originalName: typeSpellKey),
       );
-      if (imported != null) return imported;
+      if (imported != null) return ImportedType.fromPublic(imported);
       if (cxTypeKindToImportedTypes.containsKey(typeSpellKey)) {
         return cxTypeKindToImportedTypes[typeSpellKey]!;
       } else {
@@ -174,10 +205,8 @@ Type? _createTypeFromCursor(
   final logger = context.logger;
   final config = context.config;
   final usr = cursor.usr();
-  final imported = context.config.importType(
-    Declaration(usr: usr, originalName: cursor.spelling()),
-  );
-  if (imported != null) return imported;
+  final imported = context.config.importType(cursor.declaration());
+  if (imported != null) return ImportedType.fromPublic(imported);
   switch (cxtype.kind) {
     case clang_types.CXTypeKind.CXType_Typedef:
       final spelling = clang.clang_getTypedefName(cxtype).toStringAndDispose();
@@ -190,16 +219,16 @@ Type? _createTypeFromCursor(
       final importedTypedef = context.config.importType(
         Declaration(usr: usr, originalName: spelling),
       );
-      if (importedTypedef != null) return importedTypedef;
-      // Get name from supported typedef name if config allows.
-      if (config.typedefs.useSupportedTypedefs) {
-        if (suportedTypedefToSuportedNativeType.containsKey(spelling)) {
-          logger.fine('  Type Mapped from supported typedef');
-          return NativeType(suportedTypedefToSuportedNativeType[spelling]!);
-        } else if (supportedTypedefToImportedType.containsKey(spelling)) {
-          logger.fine('  Type Mapped from supported typedef');
-          return supportedTypedefToImportedType[spelling]!;
-        }
+      if (importedTypedef != null) {
+        return ImportedType.fromPublic(importedTypedef);
+      }
+      // Get name from supported typedef name.
+      if (suportedTypedefToSuportedNativeType.containsKey(spelling)) {
+        logger.fine('  Type Mapped from supported typedef');
+        return NativeType(suportedTypedefToSuportedNativeType[spelling]!);
+      } else if (supportedTypedefToImportedType.containsKey(spelling)) {
+        logger.fine('  Type Mapped from supported typedef');
+        return supportedTypedefToImportedType[spelling]!;
       }
 
       final typealias = parseTypedefDeclaration(context, cursor);
@@ -251,35 +280,35 @@ Type? _extractfromRecord(
   final config = context.config;
   logger.fine('${_padding}_extractfromRecord: ${cursor.completeStringRepr()}');
 
-  final declSpelling = cursor.spelling();
   final cursorKind = clang.clang_getCursorKind(cursor);
 
-  if (config.cpp?.classes != null) {
+  final isClassOrStruct =
+      cursorKind == clang_types.CXCursorKind.CXCursor_ClassDecl ||
+      cursorKind == clang_types.CXCursorKind.CXCursor_StructDecl;
+
+  if (config.cpp != null) {
     final seenCppClass = context.bindingsIndex.getSeenCppClass(cursor.usr());
-    if (seenCppClass != null) {
-      return seenCppClass;
-    }
-    if (cursorKind == clang_types.CXCursorKind.CXCursor_ClassDecl ||
-        cursorKind == clang_types.CXCursorKind.CXCursor_StructDecl) {
+    if (seenCppClass != null) return seenCppClass;
+
+    final hasDefinition =
+        clang.clang_Cursor_isNull(clang.clang_getCursorDefinition(cursor)) == 0;
+    final isPodType = clang.clang_isPODType(cxtype) == 1;
+    // Only non-POD records get the C++ class treatment; a POD record has a
+    // layout the plain struct parser models correctly, so it is parsed as a
+    // C struct below no matter which keyword declared it.
+    if (isClassOrStruct && hasDefinition && !isPodType) {
       final cppClass = parseClassDeclaration(context, cursor);
-      if (cppClass != null) {
-        return cppClass;
-      }
+      if (cppClass != null) return cppClass;
     }
   }
 
-  if (cursorKind == clang_types.CXCursorKind.CXCursor_StructDecl) {
-    final imported = context.config.importType(
-      Declaration(usr: cursor.usr(), originalName: declSpelling),
-    );
-    if (imported != null) return imported;
-    return parseStructDeclaration(cursor, context);
-  } else if (cursorKind == clang_types.CXCursorKind.CXCursor_UnionDecl) {
-    final imported = context.config.importType(
-      Declaration(usr: cursor.usr(), originalName: declSpelling),
-    );
-    if (imported != null) return imported;
-    return parseUnionDeclaration(cursor, context);
+  final isUnion = cursorKind == clang_types.CXCursorKind.CXCursor_UnionDecl;
+  if (isClassOrStruct || isUnion) {
+    final imported = context.config.importType(cursor.declaration());
+    if (imported != null) return ImportedType.fromPublic(imported);
+    return isUnion
+        ? parseUnionDeclaration(cursor, context)
+        : parseStructDeclaration(cursor, context);
   }
 
   logger.fine(
@@ -287,6 +316,41 @@ Type? _extractfromRecord(
     'Not Implemented, ${cursor.completeStringRepr()}',
   );
   return UnimplementedType('${cxtype.kindSpelling()} not implemented');
+}
+
+Type _extractUniquePtrType(
+  Context context,
+  clang_types.CXType cxtype,
+  int numTemplateArgs,
+  String spelling,
+) {
+  final logger = context.logger;
+
+  if (numTemplateArgs != 1) {
+    logger.warning(
+      'std::unique_ptr with a custom deleter is not supported '
+      '($numTemplateArgs template args in "$spelling"). Skipping.',
+    );
+    return UnimplementedType('unique_ptr with custom deleter not supported');
+  }
+
+  final innerCXType = clang.clang_Type_getTemplateArgumentAsType(cxtype, 0);
+  final innerType = getCodeGenType(context, innerCXType);
+
+  if (innerType is CppClass) {
+    logger.fine(
+      '  unique_ptr<${innerType.originalName}> is an owned CppUniquePtrType',
+    );
+    return CppUniquePtrType(innerType);
+  }
+
+  logger.warning(
+    'std::unique_ptr inner type is not a known C++ class '
+    '(got ${innerType.runtimeType} from "$spelling"). Skipping.',
+  );
+  return UnimplementedType(
+    'unique_ptr inner type is not a supported C++ class',
+  );
 }
 
 // Used for function pointer arguments.

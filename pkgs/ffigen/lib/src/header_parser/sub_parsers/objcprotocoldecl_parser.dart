@@ -21,8 +21,7 @@ ObjCProtocol? parseObjCProtocolDeclaration(
     return null;
   }
 
-  final objcProtocols = config.objectiveC?.protocols;
-  if (objcProtocols == null) {
+  if (config.objectiveC == null) {
     return null;
   }
 
@@ -63,8 +62,7 @@ ObjCProtocol? parseObjCProtocolDeclaration(
     context: context,
     usr: usr,
     originalName: name,
-    name: objcProtocols.rename(decl),
-    module: objcProtocols.module(decl),
+    name: name,
     dartDoc: getCursorDocComment(
       context,
       cursor,
@@ -91,20 +89,13 @@ ObjCProtocol? parseObjCProtocolDeclaration(
         }
         break;
       case clang_types.CXCursorKind.CXCursor_ObjCPropertyDecl:
-        final (getter, setter) = parseObjCProperty(
-          context,
-          child,
-          decl,
-          objcProtocols,
-        );
+        final (getter, setter) = parseObjCProperty(context, child, decl);
         protocol.addMethod(getter);
         protocol.addMethod(setter);
         break;
       case clang_types.CXCursorKind.CXCursor_ObjCInstanceMethodDecl:
       case clang_types.CXCursorKind.CXCursor_ObjCClassMethodDecl:
-        protocol.addMethod(
-          parseObjCMethod(context, child, decl, objcProtocols),
-        );
+        protocol.addMethod(parseObjCMethod(context, child, decl));
         break;
     }
   });

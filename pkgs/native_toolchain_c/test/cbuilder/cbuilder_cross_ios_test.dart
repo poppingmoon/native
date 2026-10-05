@@ -14,6 +14,7 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 import 'package:native_toolchain_c/src/utils/run_process.dart';
+import 'package:process/process.dart';
 import 'package:test/test.dart';
 import 'package:test_case_selector/test_case_selector.dart';
 
@@ -26,16 +27,21 @@ const name = 'add';
 ///
 /// | #   | Architecture | IOSSdk          | IOSVersion | Link Mode | Language    | Optimization Level |
 /// |-----|--------------|-----------------|------------|-----------|-------------|--------------------|
-/// | 1   | arm64        | iphoneos        | 16         | bundled   | c           | Os                 |
+/// | 1   | arm64        | iphoneos        | 16         | bundled   | objective c | Os                 |
 /// | 2   | arm64        | iphoneos        | 16         | static    | c           | unspecified        |
-/// | 3   | arm64        | iphoneos        | 17         | bundled   | c           | O3                 |
-/// | 4   | arm64        | iphonesimulator | 16         | static    | objective c | O0                 |
-/// | 5   | x64          | iphonesimulator | 17         | bundled   | objective c | O1                 |
-/// | 6   | x64          | iphonesimulator | 17         | static    | c           | O2                 |
+/// | 3   | arm64        | iphonesimulator | 16         | bundled   | objective c | O3                 |
+/// | 4   | arm64e       | iphoneos        | 17         | static    | c           | O2                 |
+/// | 5   | arm64e       | iphonesimulator | 17         | bundled   | objective c | O1                 |
+/// | 6   | x64          | iphonesimulator | 16         | static    | objective c | O0                 |
+/// | 7   | x64          | iphonesimulator | 17         | bundled   | c           | Os                 |
 final configurations =
     TestCaseSelector(
       dimensions: {
-        Architecture: [Architecture.arm64, Architecture.x64],
+        Architecture: [
+          Architecture.arm64,
+          Architecture.arm64e,
+          Architecture.x64,
+        ],
         IOSSdk: [IOSSdk.iPhoneOS, IOSSdk.iPhoneSimulator],
         IOSVersion: [
           IOSVersion.flutterHighestBestEffort,
@@ -151,6 +157,7 @@ void main() {
           executable: Uri.file('objdump'),
           arguments: ['-t', libUri.path],
           logger: logger,
+          processManager: const LocalProcessManager(),
         );
         expect(objdumpResult.exitCode, 0);
         final machine = objdumpResult.stdout
@@ -162,6 +169,7 @@ void main() {
           executable: Uri.file('otool'),
           arguments: ['-l', libUri.path],
           logger: logger,
+          processManager: const LocalProcessManager(),
         );
         expect(otoolResult.exitCode, 0);
         expect(otoolResult.stdout, contains('minos $iOSVersion.0'));
@@ -197,6 +205,7 @@ void main() {
               executable: Uri.file('install_name_tool'),
               arguments: ['-id', targetInstallName, libUri.toFilePath()],
               logger: logger,
+              processManager: const LocalProcessManager(),
             );
             final libInstallName2 = await runOtoolInstallName(libUri, libName);
             expect(libInstallName2, targetInstallName);

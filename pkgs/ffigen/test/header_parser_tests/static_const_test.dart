@@ -3,6 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:ffigen/src/code_generator.dart';
+import 'package:ffigen/src/config_provider.dart';
+import 'package:ffigen/src/config_provider/public_visitor.dart';
 import 'package:ffigen/src/header_parser.dart' as parser;
 import 'package:ffigen/src/strings.dart' as strings;
 import 'package:path/path.dart' as path;
@@ -18,11 +20,30 @@ void main() {
       expected = expectedLibrary();
       actual = parser.parse(
         testContext(
-          testConfigFromPath(
-            configPath(
-              path.join(packagePathForTests, 'test', 'header_parser_tests'),
-              'static_const_config.yaml',
+          FfiGenerator(
+            output: Output(
+              dart: DartOutput(path: Uri.file('unused')),
+              style: const DynamicLibraryBindings(),
             ),
+            input: Input(
+              entryPoints: [
+                Uri.file(
+                  path.join(
+                    packagePathForTests,
+                    'test',
+                    'header_parser_tests',
+                    'static_const.h',
+                  ),
+                ),
+              ],
+              include: (header) => header.path.endsWith('static_const.h'),
+            ),
+            visitors: [
+              Visitor(
+                global: (node) => node.isIncluded = true,
+                typealias: (node) => node.isIncluded = .always,
+              ),
+            ],
           ),
         ),
       );
@@ -191,60 +212,129 @@ Library expectedLibrary() {
   return Library(
     context: testContext(),
     bindings: [
-      Constant(name: 'TEST_INT', rawType: 'int', rawValue: '10'),
-      Constant(name: 'TEST_NEGATIVE_INT', rawType: 'int', rawValue: '-10'),
-      Constant(name: 'TEST_DOUBLE', rawType: 'double', rawValue: '3.14'),
-      Constant(
+      Global(
+        name: 'TEST_INT',
+        type: intType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '10'),
+      ),
+      Global(
+        name: 'TEST_NEGATIVE_INT',
+        type: intType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '-10'),
+      ),
+      Global(
+        name: 'TEST_DOUBLE',
+        type: doubleType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'double', value: '3.14'),
+      ),
+      Global(
         name: 'TEST_NEGATIVE_DOUBLE',
-        rawType: 'double',
-        rawValue: '-3.14',
+        type: doubleType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'double', value: '-3.14'),
       ),
-      Constant(name: 'TEST_EXPRESSION', rawType: 'int', rawValue: '10'),
-      Constant(name: 'TEST_HEX', rawType: 'int', rawValue: '255'),
-      Constant(name: 'TEST_NEGATIVE_HEX', rawType: 'int', rawValue: '-255'),
-      Constant(name: 'TEST_STRING', rawType: 'String', rawValue: "'test'"),
-      Constant(
+      Global(
+        name: 'TEST_EXPRESSION',
+        type: intType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '10'),
+      ),
+      Global(
+        name: 'TEST_HEX',
+        type: intType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '255'),
+      ),
+      Global(
+        name: 'TEST_NEGATIVE_HEX',
+        type: intType,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '-255'),
+      ),
+      Global(
+        name: 'TEST_STRING',
+        type: PointerType(charType),
+        constant: true,
+        constantValue: const ConstantValue(type: 'String', value: "'test'"),
+      ),
+      Global(
         name: 'TEST_STRING_SPECIAL',
-        rawType: 'String',
-        rawValue: r"'\$dollar'",
+        type: PointerType(charType),
+        constant: true,
+        constantValue: const ConstantValue(
+          type: 'String',
+          value: r"'\$dollar'",
+        ),
       ),
-      Constant(
+      Global(
         name: 'TEST_STRING_QUOTES',
-        rawType: 'String',
-        rawValue: r"'test\'s'",
+        type: PointerType(charType),
+        constant: true,
+        constantValue: const ConstantValue(type: 'String', value: r"'test\'s'"),
       ),
-      Constant(
+      Global(
         name: 'TEST_STRING_BACKSLASH',
-        rawType: 'String',
-        rawValue: r"'test\\'",
+        type: PointerType(charType),
+        constant: true,
+        constantValue: const ConstantValue(type: 'String', value: r"'test\\'"),
       ),
-      Constant(
+      Global(
         name: 'TEST_STRING_CONTROLS',
-        rawType: 'String',
-        rawValue: r"'hello\n\t\r\v\b'",
+        type: PointerType(charType),
+        constant: true,
+        constantValue: const ConstantValue(
+          type: 'String',
+          value: r"'hello\n\t\r\v\b'",
+        ),
       ),
-      Constant(
+      Global(
         name: 'TEST_INF',
-        rawType: 'double',
-        rawValue: strings.doubleInfinity,
+        type: doubleType,
+        constant: true,
+        constantValue: const ConstantValue(
+          type: 'double',
+          value: strings.doubleInfinity,
+        ),
       ),
-      Constant(
+      Global(
         name: 'TEST_NEGATIVE_INF',
-        rawType: 'double',
-        rawValue: strings.doubleNegativeInfinity,
+        type: doubleType,
+        constant: true,
+        constantValue: const ConstantValue(
+          type: 'double',
+          value: strings.doubleNegativeInfinity,
+        ),
       ),
-      Constant(
+      Global(
         name: 'TEST_NAN',
-        rawType: 'double',
-        rawValue: strings.doubleNaN,
+        type: doubleType,
+        constant: true,
+        constantValue: const ConstantValue(
+          type: 'double',
+          value: strings.doubleNaN,
+        ),
       ),
       myFlags,
       myBufferUsage,
-      Constant(name: 'MyBufferUsage_None', rawType: 'int', rawValue: '0'),
-      Constant(name: 'MyBufferUsage_MapRead', rawType: 'int', rawValue: '1'),
+      Global(
+        name: 'MyBufferUsage_None',
+        type: myBufferUsage,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '0'),
+      ),
+      Global(
+        name: 'MyBufferUsage_MapRead',
+        type: myBufferUsage,
+        constant: true,
+        constantValue: const ConstantValue(type: 'int', value: '1'),
+      ),
       Global(
         name: 'TEST_STRING_ARRAY',
         type: ConstantArray(11, charType, useArrayType: false),
+        constant: true,
       ),
       Global(name: 'test_global', type: intType),
     ],

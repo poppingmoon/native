@@ -2,19 +2,22 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:io';
+
 import 'package:jnigen/jnigen.dart';
+import 'package:jnigen/src/bindings/dart_generator.dart';
 import 'package:jnigen/src/bindings/linker.dart';
 import 'package:jnigen/src/bindings/renamer.dart';
 import 'package:jnigen/src/elements/elements.dart' as ast;
 import 'package:test/test.dart';
 
 extension on Iterable<ast.Method> {
-  List<bool> get isExcludedValues =>
-      map((c) => c.userDefinedIsExcluded).toList();
+  List<bool> get isIncludedValues =>
+      map((c) => c.userDefinedIsIncluded).toList();
 }
 
 extension on Iterable<ast.Field> {
-  List<bool> get isExcludedValues => map((c) => c.isExcluded).toList();
+  List<bool> get isIncludedValues => map((c) => c.isIncluded).toList();
 }
 
 extension on Iterable<ast.Method> {
@@ -30,14 +33,15 @@ extension on Iterable<ast.Field> {
 }
 
 Future<void> rename(ast.Classes classes) async {
-  final config = Config(
-      outputConfig: OutputConfig(
-        dartConfig: DartCodeOutputConfig(
-          path: Uri.file('test.dart'),
-          structure: OutputStructure.singleFile,
-        ),
+  final config = JniGenerator(
+    input: Input(classes: []),
+    output: Output(
+      dart: DartOutput(
+        path: Uri.file('test.dart'),
+        structure: OutputStructure.singleFile,
       ),
-      classes: []);
+    ),
+  );
   await classes.accept(Linker(config));
   classes.accept(Renamer(config));
 }
@@ -48,21 +52,21 @@ base class CustomVisitor extends Visitor {
   @override
   void visitClass(ClassDecl c) {
     if (c.binaryName.contains('y')) {
-      c.isExcluded = true;
+      c.isIncluded = false;
     }
   }
 
   @override
   void visitMethod(Method method) {
     if (method.name == 'Bar') {
-      method.isExcluded = true;
+      method.isIncluded = false;
     }
   }
 
   @override
   void visitField(Field field) {
     if (field.name == 'Bar') {
-      field.isExcluded = true;
+      field.isIncluded = false;
     }
   }
 }
@@ -104,13 +108,13 @@ void main() {
     final simpleClasses = Classes(classes);
     simpleClasses.accept(CustomVisitor());
 
-    expect(classes.decls['y.Foo']?.isExcluded, true);
-    expect(classes.decls['Foo']?.isExcluded, false);
+    expect(classes.decls['y.Foo']?.isIncluded, false);
+    expect(classes.decls['Foo']?.isIncluded, true);
 
-    expect(classes.decls['Foo']?.fields.isExcludedValues,
-        [false, true, false, true]);
-    expect(classes.decls['Foo']?.methods.isExcludedValues,
-        [false, true, false, true]);
+    expect(classes.decls['Foo']?.fields.isIncludedValues,
+        [true, false, true, false]);
+    expect(classes.decls['Foo']?.methods.isIncludedValues,
+        [true, false, true, false]);
   });
   test('Exclude something using the user excluder, Simple AST', () async {
     final classes = ast.Classes({
@@ -148,31 +152,31 @@ void main() {
     final simpleClasses = Classes(classes);
     simpleClasses.accept(
       Visitor(
-        visitClass: (c) {
+        classDecl: (c) {
           if (c.binaryName.contains('y')) {
-            c.isExcluded = true;
+            c.isIncluded = false;
           }
         },
-        visitMethod: (method) {
+        method: (method) {
           if (method.name == 'Bar') {
-            method.isExcluded = true;
+            method.isIncluded = false;
           }
         },
-        visitField: (field) {
+        field: (field) {
           if (field.name == 'Bar') {
-            field.isExcluded = true;
+            field.isIncluded = false;
           }
         },
       ),
     );
 
-    expect(classes.decls['y.Foo']?.isExcluded, true);
-    expect(classes.decls['Foo']?.isExcluded, false);
+    expect(classes.decls['y.Foo']?.isIncluded, false);
+    expect(classes.decls['Foo']?.isIncluded, true);
 
-    expect(classes.decls['Foo']?.fields.isExcludedValues,
-        [false, true, false, true]);
-    expect(classes.decls['Foo']?.methods.isExcludedValues,
-        [false, true, false, true]);
+    expect(classes.decls['Foo']?.fields.isIncludedValues,
+        [true, false, true, false]);
+    expect(classes.decls['Foo']?.methods.isIncludedValues,
+        [true, false, true, false]);
   });
 
   test('Rename classes, fields, methods and params using the user renamer',
@@ -212,12 +216,12 @@ void main() {
     final simpleClasses = Classes(classes);
     simpleClasses.accept(
       Visitor(
-        visitClass: (c) {
+        classDecl: (c) {
           if (c.originalName.contains('Foo')) {
             c.name = c.originalName.replaceAll('Foo', 'Bar');
           }
         },
-        visitMethod: (method) {
+        method: (method) {
           if (method.originalName.contains('Foo')) {
             method.name = method.originalName.replaceAll('Foo', 'Bar');
           }
@@ -225,12 +229,12 @@ void main() {
             method.name = 'constructor';
           }
         },
-        visitField: (field) {
+        field: (field) {
           if (field.originalName.contains('Foo')) {
             field.name = field.originalName.replaceAll('Foo', 'Bar');
           }
         },
-        visitParam: (parameter) {
+        param: (parameter) {
           if (parameter.originalName.contains('Foo')) {
             parameter.name = parameter.originalName.replaceAll('Foo', 'Bar');
           }
@@ -253,5 +257,102 @@ void main() {
 
     expect(classes.decls['y.Foo']?.methods.first.params.finalNames,
         ['Bar', 'Bar1']);
+  });
+
+  test('Rename interface mixin using the user visitor', () async {
+    final classes = ast.Classes({
+      'Foo': ast.ClassDecl(
+        binaryName: 'Foo',
+        declKind: ast.DeclKind.interfaceKind,
+        superclass: ast.DeclaredType.object,
+      ),
+    });
+
+    Classes(classes).accept(
+      Visitor(
+        classDecl: (c) {
+          if (c.originalName == 'Foo') {
+            c.interfaceMixinName = 'FooInterface';
+          }
+        },
+      ),
+    );
+
+    expect(
+      classes.decls['Foo']!.userDefinedInterfaceMixinName,
+      'FooInterface',
+    );
+
+    await rename(classes);
+
+    expect(
+      classes.decls['Foo']!.finalInterfaceMixinName,
+      'FooInterface',
+    );
+  });
+
+  test('Use the renamed interface mixin in generated bindings', () async {
+    final tempDirectory = Directory.systemTemp.createTempSync(
+      'jnigen_interface_mixin_test_',
+    );
+    addTearDown(() => tempDirectory.deleteSync(recursive: true));
+
+    final output = tempDirectory.uri.resolve('bindings.dart');
+    final config = JniGenerator(
+      input: Input(classes: []),
+      output: Output(
+        dart: DartOutput(
+          path: output,
+          structure: OutputStructure.singleFile,
+        ),
+      ),
+    );
+
+    final classes = ast.Classes({
+      'Foo': ast.ClassDecl(
+        binaryName: 'Foo',
+        declKind: ast.DeclKind.interfaceKind,
+        superclass: ast.DeclaredType.object,
+        methods: [
+          ast.Method(
+            name: 'run',
+            returnType: ast.PrimitiveType.fromJson({'name': 'void'}),
+          ),
+        ],
+      ),
+    });
+
+    Classes(classes).accept(
+      Visitor(
+        classDecl: (c) {
+          if (c.originalName == 'Foo') {
+            c.interfaceMixinName = 'FooInterface';
+          }
+        },
+      ),
+    );
+
+    await classes.accept(Linker(config));
+    classes.accept(Renamer(config));
+    await classes.accept(DartGenerator(config));
+
+    final content = File.fromUri(output).readAsStringSync();
+
+    expect(
+      content,
+      contains('abstract base mixin class FooInterface'),
+    );
+    expect(
+      content,
+      contains('final class _FooInterface with FooInterface'),
+    );
+    expect(
+      content,
+      contains(r'FooInterface $impl'),
+    );
+    expect(
+      content,
+      isNot(contains(r'abstract base mixin class $Foo')),
+    );
   });
 }

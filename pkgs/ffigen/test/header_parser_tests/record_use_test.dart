@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:ffigen/src/config_provider.dart';
+import 'package:ffigen/ffigen.dart';
 import 'package:ffigen/src/header_parser.dart' show parse;
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -11,20 +11,25 @@ import '../test_utils.dart';
 
 void main() {
   group('record_use_test', () {
-    test('Expected Bindings', () {
+    test('Expected Bindings', () async {
       final headerFile = absPath(
         p.join('test', 'header_parser_tests', 'record_use.h'),
       );
       final generator = FfiGenerator(
         input: Input(entryPoints: [Uri.file(headerFile)]),
-        functions: Functions(
-          include: (decl) => true,
-          recordUse: (decl) => true,
-          rename: (decl) =>
-              decl.originalName == 'sum' ? 'add' : decl.originalName,
-        ),
+        visitors: [
+          Visitor(
+            func: (node) {
+              node.isIncluded = true;
+              node.recordUse = true;
+              if (node.name == 'sum') {
+                node.name = 'add';
+              }
+            },
+          ),
+        ],
         output: Output(
-          dartFile: Uri.file('unused.dart'),
+          dart: DartOutput(path: Uri.file('unused.dart')),
           style: const NativeExternalBindings(),
           recordUseMapping: Uri.file('unused_mapping.dart'),
         ),
@@ -33,14 +38,19 @@ void main() {
       final context = testContext(generator);
       final library = parse(context);
 
-      matchLibraryWithExpected(context, library, 'record_use_bindings.dart', [
-        'test',
-        'header_parser_tests',
-        'expected_bindings',
-        '_expected_record_use_bindings.dart',
-      ]);
+      await matchLibraryWithExpected(
+        context,
+        library,
+        'record_use_bindings.dart',
+        [
+          'test',
+          'header_parser_tests',
+          'expected_bindings',
+          '_expected_record_use_bindings.dart',
+        ],
+      );
 
-      matchRecordUseMappingWithExpected(
+      await matchRecordUseMappingWithExpected(
         context,
         library,
         'record_use_mapping.dart',

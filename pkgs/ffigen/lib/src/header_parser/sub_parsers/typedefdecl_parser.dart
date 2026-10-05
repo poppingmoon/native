@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../../code_generator.dart';
-import '../../config_provider/config_types.dart';
 import '../../context.dart';
 import '../clang_bindings/clang_bindings.dart' as clang_types;
 import '../type_extractor/extractor.dart';
@@ -30,7 +29,6 @@ Typealias parseTypedefDeclaration(
   clang_types.CXCursor cursor,
 ) {
   final logger = context.logger;
-  final config = context.config;
   final bindingsIndex = context.bindingsIndex;
   final name = cursor.spelling();
   final usr = cursor.usr();
@@ -38,13 +36,14 @@ Typealias parseTypedefDeclaration(
   final cachedType = bindingsIndex.getSeenTypealias(usr);
   if (cachedType != null) return cachedType;
 
-  final decl = Declaration(usr: usr, originalName: name);
   final ct = clang.clang_getTypedefDeclUnderlyingType(cursor);
   final s = getCodeGenType(context, ct, originalCursor: cursor);
 
   if (bindingsIndex.isSeenUnsupportedTypealias(usr)) {
     // Do not process unsupported typealiases again.
-  } else if (s is UnimplementedType) {
+  } else if (s.baseType is UnimplementedType) {
+    // Also covers a pointer to an unimplemented type, e.g. a typedef to a
+    // function pointer whose parameters include an unsupported type.
     logger.fine(
       "Skipped Typedef '$name': "
       'Unimplemented type referred.',
@@ -78,12 +77,17 @@ Typealias parseTypedefDeclaration(
     final type = Typealias(
       usr: usr,
       originalName: name,
-      name: config.typedefs.rename(decl),
+      name: name,
       type: s,
       dartDoc: getCursorDocComment(context, cursor),
     );
     bindingsIndex.addTypealiasToSeen(usr, type);
     return type;
   }
-  return Typealias.anonymous(usr: usr, name: name, type: s);
+  return Typealias.anonymous(
+    usr: usr,
+    name: name,
+    type: s,
+    dartDoc: getCursorDocComment(context, cursor),
+  );
 }

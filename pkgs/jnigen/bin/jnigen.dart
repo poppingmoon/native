@@ -7,13 +7,18 @@ import 'package:jnigen/src/logging/logging.dart';
 
 void main(List<String> args) async {
   enableLoggingToFile();
-  Config config;
+  JniGenerator config;
   try {
-    config = Config.parseArgs(args);
+    config = JniGenerator.parseArgs(args);
   } on ConfigException catch (e) {
     log.fatal(e);
   } on FormatException catch (e) {
     log.fatal(e);
   }
-  await generateJniBindings(config);
+  log.warning(
+    'The YAML configuration format is deprecated and will be removed in a '
+    'future release. Please migrate to the programmatic Dart generator API. '
+    'See skills/jnigen-migrate-yaml-to-dart for migration instructions.',
+  );
+  await config.generate(logger: log);
 }

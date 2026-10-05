@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../code_generator.dart';
+import '../config_provider/public_ast.dart' as public_ast;
 import '../context.dart';
 import '../visitor/ast.dart';
 
@@ -17,24 +18,54 @@ enum CppMethodKind { constructor, method }
 /// A method or constructor belonging to a C++ class.
 class CppMethod extends AstNode with HasLocalScope {
   final Symbol name;
+  final Symbol cBindingSymbol;
   final String originalName;
+
   final Type returnType;
   final List<Parameter> parameters;
   final bool isConstant;
   final bool isStatic;
   final CppMethodKind kind;
+  final CppClass? originatingClass;
+
+  bool isIncluded = true;
 
   CppMethod({
     required this.name,
+    required this.cBindingSymbol,
     required this.originalName,
     required this.returnType,
     required this.parameters,
     required this.isConstant,
     this.isStatic = false,
     this.kind = CppMethodKind.method,
+    this.originatingClass,
   });
 
   bool get isConstructor => kind == .constructor;
+
+  CppMethod cloneForClass(CppClass targetClass, CppClass baseClass) {
+    return CppMethod(
+      name: name.clone(),
+      cBindingSymbol: Symbol(
+        '${targetClass.originalName}_$originalName',
+        SymbolKind.method,
+      ),
+      originalName: originalName,
+      returnType: returnType,
+      parameters: parameters.map((p) => p.clone()).toList(),
+      isConstant: isConstant,
+      isStatic: isStatic,
+      kind: kind,
+      originatingClass: baseClass,
+    );
+  }
+
+  String signatureKey() {
+    final paramTypes = parameters.map((p) => p.type.cacheKey()).join(',');
+    final constSuffix = isConstant ? ' const' : '';
+    return '$originalName($paramTypes)$constSuffix';
+  }
 
   @override
   void visit(Visitation visitation) => visitation.visitCppMethod(this);
@@ -43,8 +74,10 @@ class CppMethod extends AstNode with HasLocalScope {
   void visitChildren(Visitor visitor) {
     super.visitChildren(visitor);
     visitor.visit(name);
+    visitor.visit(cBindingSymbol);
     visitor.visit(returnType);
     visitor.visitAll(parameters);
+    visitor.visit(originatingClass);
   }
 }
 
@@ -69,6 +102,13 @@ class CppClass extends BindingType with HasLocalScope {
   final Context context;
   final List<CppMethod> methods;
   final List<CppMember> fields;
+  bool isIncluded = false;
+
+  /// The public C++ base classes for this class, in declaration order.
+  ///
+  /// Only public inheritance is represented here. Protected and private bases
+  /// are silently ignored by the parser.
+  final List<CppClass> bases;
 
   CppClass({
     super.usr,
@@ -78,7 +118,11 @@ class CppClass extends BindingType with HasLocalScope {
     required this.context,
     required this.methods,
     required this.fields,
+    this.bases = const [],
   });
+
+  @override
+  public_ast.AstNode? toPublicAstNode() => public_ast.CppClass(this);
 
   @override
   void visit(Visitation visitation) => visitation.visitCppClass(this);
@@ -91,6 +135,15 @@ class CppClass extends BindingType with HasLocalScope {
     required bool objCAutorelease,
     required LocalVariables localVariables,
   }) => '$value._ptr';
+
+  void copyMethod(CppMethod method, CppClass originatingBase) {
+    final cloned = method.cloneForClass(this, originatingBase);
+    methods.add(cloned);
+  }
+
+  void filterMethods(bool Function(CppMethod method) predicate) {
+    methods.retainWhere(predicate);
+  }
 
   @override
   BindingString toBindingString(Writer w) {
@@ -111,8 +164,13 @@ class CppClass extends BindingType with HasLocalScope {
     final deleteGlue = '_$deleteSymbol';
 
     s.write(makeDartDoc(dartDoc));
+    // Build the implements clause: ffi.Finalizable + public base classes.
+    final implementsClause = [
+      '$ffiPrefix.Finalizable',
+      ...bases.map((b) => b.name),
+    ].join(', ');
     s.write('''
-class $name implements $ffiPrefix.Finalizable {
+class $name implements $implementsClause {
   $ptrVoid _ptr;
 ''');
 
@@ -194,15 +252,26 @@ class $name implements $ffiPrefix.Finalizable {
     _activeFinalizerFn = null;
   }
 
+  /// Detaches the finalizer and invalidates this object, returning the
+  /// underlying C++ pointer.
+  ///
+  /// Throws a [StateError] if the object has already been disposed, or if
+  /// this object does not own the pointer.
+  $ptrVoid detachPointer() {
+    final rawPtr = _ptr;
+    releaseOwnership();
+    _ptr = $ffiPrefix.nullptr;
+    return rawPtr;
+  }
 ''');
 
     for (final ctor in constructors) {
-      final glueName = ctor.name.name;
+      final glueName = ctor.cBindingSymbol.name;
       final privateName = '_$glueName';
 
       final dartParams = dartParamList(ctor.parameters);
-
       final localVars = LocalVariables(ctor.localScope);
+
       final callArgs = ctor.parameters
           .map(
             (p) => p.type.convertDartTypeToFfiDartType(
@@ -224,11 +293,11 @@ class $name implements $ffiPrefix.Finalizable {
     }
 
     for (final method in classMethods) {
-      final glue = '_${method.name.name}';
+      final glue = '_${method.cBindingSymbol.name}';
       final dartReturn = method.returnType.getDartType(ctx);
       final dartParams = dartParamList(method.parameters);
-
       final localVars = LocalVariables(method.localScope);
+
       final callArgs = [
         if (!method.isStatic) '_ptr',
         ...method.parameters.map(
@@ -249,27 +318,30 @@ class $name implements $ffiPrefix.Finalizable {
         objCRetain: false,
       );
 
+      final hasReturn = method.returnType != voidType;
+      final callLine = hasReturn ? 'return $returnExpr;' : '$returnExpr;';
+
       if (method.isStatic) {
         s.write('''\
-  static $dartReturn ${method.originalName}($dartParams) {
+  static $dartReturn ${method.name}($dartParams) {
     $decls
-    return $returnExpr;
+    $callLine
   }
 ''');
       } else {
         s.write('''\
-  $dartReturn ${method.originalName}($dartParams) {
+  $dartReturn ${method.name}($dartParams) {
     if (_ptr == $ffiPrefix.nullptr) {
       throw StateError('This object has already been disposed.');
     }
     $decls
-    return $returnExpr;
+    $callLine
   }
 ''');
       }
     }
     s.write('''
-  void dispose() {
+  ${bases.isNotEmpty ? '@override\n  ' : ''}void dispose() {
     if (_ptr == $ffiPrefix.nullptr) {
       throw StateError('This object has already been disposed.');
     }
@@ -284,6 +356,7 @@ class $name implements $ffiPrefix.Finalizable {
     _ptr = $ffiPrefix.nullptr;
   }
 ''');
+
     s.write('}\n');
 
     // Writes a @Native annotation + external declaration for a glue function.
@@ -306,7 +379,7 @@ class $name implements $ffiPrefix.Finalizable {
     }
 
     for (final method in methods) {
-      final symbol = method.name.name;
+      final symbol = method.cBindingSymbol.name;
       final glue = '_$symbol';
 
       final cReturn = method.isConstructor
@@ -364,12 +437,13 @@ FFIGEN_EXPORT void ${name}_delete($originalName* self) {
 
     final methodBindings = methods
         .map((method) {
-          final symbol = method.name.name;
-          final callArgs = method.parameters.map((p) => p.name).join(', ');
+          final symbol = method.cBindingSymbol.name;
 
           final String returnTypeString;
           final String params;
           final String body;
+
+          final callArgs = method.parameters.map(_cppCallArg).join(', ');
 
           if (method.isConstructor) {
             returnTypeString = '$originalName*';
@@ -384,19 +458,21 @@ FFIGEN_EXPORT void ${name}_delete($originalName* self) {
             final otherParams = method.parameters.map(paramDecl);
 
             if (method.isStatic) {
+              final targetType =
+                  method.originatingClass?.originalName ?? originalName;
               params = otherParams.join(', ');
               body =
-                  '$returnPrefix$originalName::'
+                  '$returnPrefix$targetType::'
                   '${method.originalName}($callArgs);';
             } else {
-              final String selfType;
-              if (method.isConstant) {
-                selfType = 'const $originalName';
-              } else {
-                selfType = originalName;
-              }
+              final constPrefix = method.isConstant ? 'const ' : '';
+              final selfType = '$constPrefix$originalName';
               params = ['$selfType* self', ...otherParams].join(', ');
-              body = '${returnPrefix}self->${method.originalName}($callArgs);';
+              final methodName = method.originalName;
+              final suffix = method.returnType is CppUniquePtrType
+                  ? '.release()'
+                  : '';
+              body = '${returnPrefix}self->$methodName($callArgs)$suffix;';
             }
           }
 
@@ -433,6 +509,16 @@ FFIGEN_EXPORT $returnTypeString $symbol($params) {
     super.visitChildren(visitor);
     visitor.visitAll(methods);
     visitor.visitAll(fields);
+    visitor.visitAll(bases);
     visitor.visit(ffiImport);
   }
+}
+
+String _cppCallArg(Parameter p) {
+  final type = p.type;
+  if (type is CppUniquePtrType) {
+    final className = type.cppClass.originalName;
+    return 'std::unique_ptr<$className>(${p.name})';
+  }
+  return p.name;
 }

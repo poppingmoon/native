@@ -40,7 +40,6 @@ class ObjCBuiltInFunctions {
     'getProtocolMethodSignature',
   );
   static const getProtocol = ObjCImport('getProtocol');
-  static const objectRelease = ObjCImport('objectRelease');
   static const signalWaiter = ObjCImport('signalWaiter');
   static const objCContext = ObjCImport('objCContext');
   static const objectBase = ObjCImport('ObjCObject');
@@ -240,7 +239,7 @@ class ObjCBuiltInFunctions {
   static String _libraryIdFromConfigHash(FfiGenerator config) => fnvHash32(
     [
       ...config.input.entryPoints,
-      config.output.dartFile,
+      config.output.dart.path,
       config.output.objCFile,
     ].map((uri) => path.basename(uri.toFilePath())).join('\n'),
   ).toRadixString(36);
@@ -442,8 +441,14 @@ enum ObjCMsgSendVariant {
   const ObjCMsgSendVariant(this.pointer);
 
   static ObjCMsgSendVariant fromReturnType(Type returnType) {
-    if (returnType is Compound && returnType is Struct) {
-      return ObjCMsgSendVariant.stret;
+    final baseType = returnType.typealiasType;
+    if (baseType is Compound) {
+      final sizeInBytes = baseType.sizeInBytes;
+      if (sizeInBytes == null || sizeInBytes > 16) {
+        return ObjCMsgSendVariant.stret;
+      } else {
+        return ObjCMsgSendVariant.normal;
+      }
     } else if (returnType == floatType || returnType == doubleType) {
       return ObjCMsgSendVariant.fpret;
     }

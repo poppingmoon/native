@@ -5,53 +5,44 @@
 /// This is the Dart API for FFIgen. The main entrypoint is the [FfiGenerator]
 /// class.
 ///
-/// For most use cases the YAML based API is simpler. See
-/// https://pub.dev/packages/ffigen for details.
-///
-/// {@category Errors}
+/// See https://pub.dev/packages/ffigen for details and examples.
 ///
 /// @docImport 'src/config_provider.dart';
 library;
 
-export 'src/code_generator/imports.dart' show ImportedType, LibraryImport;
+export 'src/code_generator/imports.dart' show LibraryImport;
 export 'src/config_provider.dart'
     show
         BindingStyle,
-        Categories,
         CommentLength,
         CommentStyle,
         CommentType,
         CompoundDependencies,
+        Cpp,
+        DartOutput,
         Declaration,
-        Declarations,
         DynamicLibraryBindings,
         EnumStyle,
-        Enums,
         ExternalVersions,
         FfiGenerator,
-        Functions,
-        Globals,
         Input,
-        Interfaces,
-        Macros,
         NativeExternalBindings,
         ObjectiveC,
         Output,
         PackingValue,
-        Protocols,
-        Structs,
         SymbolFile,
-        Typedefs,
-        Unions,
-        UnnamedEnums,
+        TypealiasInclude,
         VarArgFunction,
         Version,
         Versions,
         YamlConfig,
-        defaultCompilerOpts,
+        importFromSymbolFile,
+        importFromSymbolFiles,
         iosSdkPath,
         iosSdkUri,
         macSdkPath,
         macSdkUri,
         xcodePath,
         xcodeUri;
+export 'src/config_provider/public_ast.dart';
+export 'src/config_provider/public_visitor.dart';

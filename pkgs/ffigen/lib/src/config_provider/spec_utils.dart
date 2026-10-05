@@ -16,7 +16,9 @@ import '../code_generator.dart';
 import '../code_generator/scope.dart';
 import '../header_parser/type_extractor/cxtypekindmap.dart';
 import '../strings.dart' as strings;
+import 'config.dart';
 import 'config_types.dart';
+import 'public_ast.dart' as public_ast;
 import 'utils.dart';
 
 Map<String, LibraryImport> libraryImportsExtractor(
@@ -52,18 +54,6 @@ void loadImportedTypes(
   }
 }
 
-YamlMap loadSymbolFile(
-  String symbolFilePath,
-  String? configFileName,
-  PackageConfig? packageConfig,
-) {
-  final path = symbolFilePath.startsWith('package:')
-      ? packageConfig!.resolve(Uri.parse(symbolFilePath))!.toFilePath()
-      : normalizePath(symbolFilePath, configFileName);
-
-  return loadYaml(File(path).readAsStringSync()) as YamlMap;
-}
-
 Map<String, ImportedType> symbolFileImportExtractor(
   Logger logger,
   List<String> yamlConfig,
@@ -71,48 +61,155 @@ Map<String, ImportedType> symbolFileImportExtractor(
   String? configFileName,
   PackageConfig? packageConfig,
 ) {
-  final resultMap = <String, ImportedType>{};
-  for (final item in yamlConfig) {
-    String symbolFilePath;
-    symbolFilePath = item;
-    final symbolFile = loadSymbolFile(
-      symbolFilePath,
-      configFileName,
-      packageConfig,
-    );
-    final formatVersion = symbolFile[strings.formatVersion] as String;
-    if (formatVersion.split('.')[0] !=
-        strings.symbolFileFormatVersion.split('.')[0]) {
-      logger.severe(
-        'Incompatible format versions for file $symbolFilePath: '
+  final uris = yamlConfig.map((item) {
+    if (item.startsWith('package:')) {
+      return Uri.parse(item);
+    }
+    return Uri.file(normalizePath(item, configFileName));
+  });
+  try {
+    return _loadSymbolFiles(uris, packageConfig, libraryImports);
+  } on FormatException catch (e) {
+    logger.severe(e.message);
+    exit(1);
+  }
+}
+
+Map<String, ImportedType> _loadSymbolFiles(
+  Iterable<Uri> symbolFiles,
+  PackageConfig? packageConfig,
+  Map<String, LibraryImport> libraryImports,
+) {
+  final uniqueNamer = Namer({
+    ...libraryImports.keys,
+    strings.defaultSymbolFileImportPrefix,
+  });
+  for (final l in libraryImports.values) {
+    uniqueNamer.markUsed(l.name);
+  }
+  final usrTypeMappings = <String, ImportedType>{};
+
+  for (final uri in symbolFiles) {
+    final File file;
+    if (uri.isScheme('package')) {
+      if (packageConfig == null) {
+        throw ArgumentError(
+          'packageConfig is required to resolve package: URIs.',
+        );
+      }
+      final resolved = packageConfig.resolve(uri);
+      if (resolved == null) {
+        throw FormatException('Unable to resolve package URI: $uri');
+      }
+      file = File.fromUri(resolved);
+    } else if (uri.isScheme('file') || !uri.hasScheme) {
+      file = File.fromUri(uri);
+    } else {
+      throw FormatException('Unsupported URI scheme: ${uri.scheme}');
+    }
+
+    final yamlContent = file.readAsStringSync();
+    final Object? yamlMap;
+    try {
+      yamlMap = loadYaml(yamlContent);
+    } catch (e) {
+      throw FormatException('Failed to parse YAML file $uri: $e');
+    }
+    if (yamlMap is! YamlMap) {
+      throw FormatException('Symbol file $uri is not a valid YAML map.');
+    }
+
+    final formatVersion = yamlMap[strings.formatVersion];
+    if (formatVersion is! String ||
+        formatVersion.split('.')[0] !=
+            strings.symbolFileFormatVersion.split('.')[0]) {
+      throw FormatException(
+        'Incompatible format versions for file $uri: '
         '${strings.symbolFileFormatVersion}(ours), $formatVersion(theirs).',
       );
-      exit(1);
     }
-    final uniqueNamer = Namer({
-      ...libraryImports.keys,
-      strings.defaultSymbolFileImportPrefix,
-    });
-    final files = symbolFile[strings.files] as YamlMap;
-    for (final file in files.keys) {
-      final existingImports = libraryImports.values.where(
-        (element) => element.importPath(false) == file,
+
+    final files = yamlMap[strings.files];
+    if (files is! YamlMap) {
+      throw FormatException(
+        'Symbol file $uri "${strings.files}" is not a valid YAML map.',
       );
-      if (existingImports.isEmpty) {
+    }
+    for (final file in files.keys) {
+      var libraryImport = libraryImports.values
+          .where((element) => element.importPath(false) == file)
+          .firstOrNull;
+      if (libraryImport == null) {
         final name = uniqueNamer.add(
           strings.defaultSymbolFileImportPrefix,
           SymbolKind.lib,
         );
-        libraryImports[name] = LibraryImport(name, file as String);
+        libraryImport = LibraryImport(name, file as String);
+        libraryImports[name] = libraryImport;
       }
-      final libraryImport = libraryImports.values.firstWhere(
-        (element) => element.importPath(false) == file,
-      );
-      loadImportedTypes(files[file] as YamlMap, resultMap, libraryImport);
+      loadImportedTypes(files[file] as YamlMap, usrTypeMappings, libraryImport);
     }
   }
-  return resultMap;
+
+  return usrTypeMappings;
 }
+
+/// Returns a function suitable for use as [FfiGenerator.importType] that
+/// imports declarations defined in the given [symbolFiles].
+///
+/// The [symbolFiles] can be `file:` URIs or `package:` URIs. [packageConfig]
+/// must be provided if any of the [symbolFiles] are `package:` URIs.
+///
+/// If multiple files contain the same symbol, later elements of [symbolFiles]
+/// will take precedence.
+///
+/// Example:
+///
+/// <!-- file://./../../../tool/snippets/symbol_files_snippet.dart#import_from_symbol_files -->
+/// ```dart
+/// final config = FfiGenerator(
+///   importType: importFromSymbolFiles([
+///     Uri.file('path/to/symbols1.yaml'),
+///     Uri.parse('package:other_pkg/symbols2.yaml'),
+///   ], packageConfig: packageConfig),
+///   output: Output(dart: DartOutput(path: Uri.file('lib/bindings.dart'))),
+/// );
+/// ```
+public_ast.ImportedType? Function(Declaration) importFromSymbolFiles(
+  Iterable<Uri> symbolFiles, {
+  PackageConfig? packageConfig,
+}) {
+  final typeMap = _loadSymbolFiles(symbolFiles, packageConfig, {});
+  return (Declaration decl) {
+    if (decl.usr.isNotEmpty) {
+      final internal = typeMap[decl.usr];
+      if (internal != null) {
+        return internal.toPublic;
+      }
+    }
+    return null;
+  };
+}
+
+/// Returns a function suitable for use as [FfiGenerator.importType] that
+/// imports declarations defined in the given [symbolFile].
+///
+/// The [symbolFile] can be a `file:` URI or `package:` URI. [packageConfig]
+/// must be provided if the [symbolFile] is a `package:` URI.
+///
+/// Example:
+///
+/// <!-- file://./../../../tool/snippets/symbol_files_snippet.dart#import_from_symbol_file -->
+/// ```dart
+/// final config = FfiGenerator(
+///   importType: importFromSymbolFile(Uri.file('path/to/symbols.yaml')),
+///   output: Output(dart: DartOutput(path: Uri.file('lib/bindings.dart'))),
+/// );
+/// ```
+public_ast.ImportedType? Function(Declaration) importFromSymbolFile(
+  Uri symbolFile, {
+  PackageConfig? packageConfig,
+}) => importFromSymbolFiles([symbolFile], packageConfig: packageConfig);
 
 Map<String, List<String>> typeMapExtractor(Map<dynamic, dynamic>? yamlConfig) {
   // Key - type_name, Value - [lib, cType, dartType].
@@ -184,81 +281,82 @@ String makePostfixFromRawVarArgType(List<String> rawVarArgType) {
 
 Type makeTypeFromRawVarArgType(
   String rawVarArgType,
-  Map<String, LibraryImport> libraryImportsMap,
+  public_ast.ImportedType? Function(Declaration declaration) importType,
 ) {
-  Type baseType;
-  var rawBaseType = rawVarArgType.trim();
-  // Split the raw type based on pointer usage. E.g -
-  // int => [int]
-  // char* => [char,*]
-  // ffi.Hello ** => [ffi.Hello,**]
-  final typeStringRegexp = RegExp(r'([a-zA-Z0-9_\s\.]+)(\**)$');
-  if (!typeStringRegexp.hasMatch(rawBaseType)) {
+  final trimmed = rawVarArgType.trim();
+  if (trimmed.isEmpty) {
     throw Exception('Cannot parse variadic argument type - $rawVarArgType.');
   }
-  final regExpMatch = typeStringRegexp.firstMatch(rawBaseType)!;
-  final groups = regExpMatch.groups([1, 2]);
-  rawBaseType = groups[0]!;
-  // Handle basic supported types.
-  if (cxTypeKindToImportedTypes.containsKey(rawBaseType)) {
-    baseType = cxTypeKindToImportedTypes[rawBaseType]!;
-  } else if (supportedTypedefToImportedType.containsKey(rawBaseType)) {
-    baseType = supportedTypedefToImportedType[rawBaseType]!;
-  } else if (suportedTypedefToSuportedNativeType.containsKey(rawBaseType)) {
-    baseType = NativeType(suportedTypedefToSuportedNativeType[rawBaseType]!);
-  } else {
-    // Use library import if specified (E.g - ffi.UintPtr or custom.MyStruct)
-    final rawVarArgTypeSplit = rawBaseType.split('.');
-    if (rawVarArgTypeSplit.length == 1) {
-      final typeName = rawVarArgTypeSplit[0].replaceAll(' ', '');
-      baseType = SelfImportedType(typeName, typeName);
-    } else if (rawVarArgTypeSplit.length == 2) {
-      final lib = rawVarArgTypeSplit[0];
-      final libraryImport =
-          builtInLibraries[lib] ?? libraryImportsMap[rawVarArgTypeSplit[0]];
-      if (libraryImport == null) {
-        throw Exception('Please declare $lib in library-imports.');
-      }
-      final typeName = rawVarArgTypeSplit[1].replaceAll(' ', '');
-      baseType = ImportedType(libraryImport, typeName, typeName, typeName);
-    } else {
-      throw Exception(
-        'Invalid type $rawVarArgType : Expected 0 or 1 .(dot) separators.',
-      );
+
+  final firstStar = trimmed.indexOf('*');
+  final String basePart;
+  final int pointerCount;
+  if (firstStar != -1) {
+    if (!RegExp(r'^[*\s]+$').hasMatch(trimmed.substring(firstStar))) {
+      throw Exception('Cannot parse variadic argument type - $rawVarArgType.');
     }
+    basePart = trimmed.substring(0, firstStar).trim();
+    if (basePart.isEmpty) {
+      throw Exception('Cannot parse variadic argument type - $rawVarArgType.');
+    }
+    pointerCount = '*'.allMatches(trimmed.substring(firstStar)).length;
+  } else {
+    basePart = trimmed;
+    pointerCount = 0;
   }
 
-  // Handle pointers
-  final pointerCount = groups[1]!.length;
+  final rawBaseType = basePart.replaceAll(RegExp(r'\s+'), ' ').trim();
+  final baseType = makeBaseTypeFromRawVarArgType(rawBaseType, importType);
+
   return makePointerToType(baseType, pointerCount);
 }
 
-Map<String, List<VarArgFunction>> makeVarArgFunctionsMapping(
-  Map<String, List<RawVarArgFunction>> rawVarArgMappings,
-  Map<String, LibraryImport> libraryImportsMap,
+Type makeBaseTypeFromRawVarArgType(
+  String rawBaseType,
+  public_ast.ImportedType? Function(Declaration declaration) importType,
 ) {
-  final mappings = <String, List<VarArgFunction>>{};
-  for (final key in rawVarArgMappings.keys) {
-    final varArgList = <VarArgFunction>[];
-    for (final rawVarArg in rawVarArgMappings[key]!) {
-      var postfix = rawVarArg.postfix ?? '';
-      final types = <Type>[];
-      for (final rva in rawVarArg.rawTypeStrings) {
-        types.add(makeTypeFromRawVarArgType(rva, libraryImportsMap));
-      }
-      if (postfix.isEmpty) {
-        if (rawVarArgMappings[key]!.length == 1) {
-          postfix = '';
-        } else {
-          postfix = makePostfixFromRawVarArgType(rawVarArg.rawTypeStrings);
-        }
-      }
-      // Extract postfix from config and/or deduce from var names.
-      varArgList.add(VarArgFunction(postfix, types));
-    }
-    mappings[key] = varArgList;
+  final typeStringRegexp = RegExp(r'^[a-zA-Z0-9_ \.]+$');
+  if (!typeStringRegexp.hasMatch(rawBaseType)) {
+    throw Exception('Cannot parse variadic argument type - $rawBaseType.');
   }
-  return mappings;
+  if (importType.call(Declaration(usr: '', originalName: rawBaseType))
+      case final imported?) {
+    return ImportedType.fromPublic(imported);
+  } else if (cxTypeKindToImportedTypes[rawBaseType] case final type?) {
+    return type;
+  } else if (supportedTypedefToImportedType[rawBaseType] case final type?) {
+    return type;
+  } else if (suportedTypedefToSuportedNativeType[rawBaseType]
+      case final type?) {
+    return NativeType(type);
+  } else {
+    final rawVarArgTypeSplit = rawBaseType
+        .split('.')
+        .map((s) => s.trim())
+        .toList();
+    if (rawVarArgTypeSplit.any((s) => s.isEmpty)) {
+      throw Exception('Cannot parse variadic argument type - $rawBaseType.');
+    }
+    if (rawVarArgTypeSplit.length == 1) {
+      final typeName = rawVarArgTypeSplit[0];
+      return SelfImportedType(typeName, typeName);
+    } else if (rawVarArgTypeSplit.length == 2) {
+      final lib = rawVarArgTypeSplit[0];
+      final libraryImport = builtInLibraries[lib];
+      if (libraryImport == null) {
+        throw Exception(
+          'Unknown library import: $lib. Valid built-in libraries are: '
+          '${builtInLibraries.keys.join(', ')}.',
+        );
+      }
+      final typeName = rawVarArgTypeSplit[1];
+      return ImportedType(libraryImport, typeName, typeName, typeName);
+    } else {
+      throw Exception(
+        'Invalid type $rawBaseType : Expected 0 or 1 .(dot) separators.',
+      );
+    }
+  }
 }
 
 final _quoteMatcher = RegExp(r'''^["'](.*)["']$''', dotAll: true);
@@ -575,21 +673,21 @@ YamlIncluder extractIncluderFromYaml(Map<dynamic, dynamic> yamlMap) {
   );
 }
 
-Map<String, List<RawVarArgFunction>> varArgFunctionConfigExtractor(
+Map<String, List<VarArgFunction>> varArgFunctionConfigExtractor(
   Map<dynamic, dynamic> yamlMap,
 ) {
-  final result = <String, List<RawVarArgFunction>>{};
+  final result = <String, List<VarArgFunction>>{};
   final configMap = yamlMap;
   for (final key in configMap.keys) {
-    final vafuncs = <RawVarArgFunction>[];
+    final vafuncs = <VarArgFunction>[];
     for (final rawVaFunc in configMap[key] as List) {
       if (rawVaFunc is List) {
-        vafuncs.add(RawVarArgFunction(null, rawVaFunc.cast()));
+        vafuncs.add(VarArgFunction(types: rawVaFunc.cast()));
       } else if (rawVaFunc is Map) {
         vafuncs.add(
-          RawVarArgFunction(
-            rawVaFunc[strings.postfix] as String?,
-            (rawVaFunc[strings.types] as List).cast(),
+          VarArgFunction(
+            postfix: (rawVaFunc[strings.postfix] as String?) ?? '',
+            types: (rawVaFunc[strings.types] as List).cast(),
           ),
         );
       } else {

@@ -3,6 +3,8 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:ffigen/src/code_generator.dart';
+import 'package:ffigen/src/config_provider.dart';
+import 'package:ffigen/src/config_provider/public_visitor.dart';
 import 'package:ffigen/src/header_parser.dart' as parser;
 import 'package:ffigen/src/strings.dart' as strings;
 import 'package:path/path.dart' as path;
@@ -18,11 +20,27 @@ void main() {
       expected = expectedLibrary();
       actual = parser.parse(
         testContext(
-          testConfigFromPath(
-            configPath(
-              path.join(packagePathForTests, 'test', 'header_parser_tests'),
-              'macros_config.yaml',
+          FfiGenerator(
+            output: Output(
+              dart: DartOutput(path: Uri.file('unused')),
+              style: const DynamicLibraryBindings(),
             ),
+            input: Input(
+              entryPoints: [
+                Uri.file(
+                  path.join(
+                    packagePathForTests,
+                    'test',
+                    'header_parser_tests',
+                    'macros.h',
+                  ),
+                ),
+              ],
+              include: (header) => header.path.endsWith('macros.h'),
+            ),
+            visitors: [
+              Visitor(macroConstant: (node) => node.isIncluded = true),
+            ],
           ),
         ),
       );
@@ -148,36 +166,40 @@ Library expectedLibrary() {
   return Library(
     context: testContext(),
     bindings: [
-      Constant(name: 'TEST1', rawType: 'double', rawValue: '1.1'),
-      Constant(name: 'TEST2', rawType: 'int', rawValue: '10'),
-      Constant(name: 'TEST3', rawType: 'double', rawValue: '11.1'),
-      Constant(name: 'TEST4', rawType: 'String', rawValue: "'test'"),
-      Constant(name: 'TEST5', rawType: 'int', rawValue: '4'),
-      Constant(name: 'TEST6', rawType: 'int', rawValue: '1'),
-      Constant(name: 'TEST8', rawType: 'int', rawValue: '5'),
-      Constant(name: 'TEST9', rawType: 'String', rawValue: r"'\$dollar'"),
-      Constant(name: 'TEST10', rawType: 'String', rawValue: r"'test\'s'"),
-      Constant(name: 'TEST11', rawType: 'String', rawValue: r"'\x80'"),
-      Constant(
+      MacroConstant(name: 'TEST1', rawType: 'double', rawValue: '1.1'),
+      MacroConstant(name: 'TEST2', rawType: 'int', rawValue: '10'),
+      MacroConstant(name: 'TEST3', rawType: 'double', rawValue: '11.1'),
+      MacroConstant(name: 'TEST4', rawType: 'String', rawValue: "'test'"),
+      MacroConstant(name: 'TEST5', rawType: 'int', rawValue: '4'),
+      MacroConstant(name: 'TEST6', rawType: 'int', rawValue: '1'),
+      MacroConstant(name: 'TEST8', rawType: 'int', rawValue: '5'),
+      MacroConstant(name: 'TEST9', rawType: 'String', rawValue: r"'\$dollar'"),
+      MacroConstant(name: 'TEST10', rawType: 'String', rawValue: r"'test\'s'"),
+      MacroConstant(name: 'TEST11', rawType: 'String', rawValue: r"'\x80'"),
+      MacroConstant(
         name: 'TEST12',
         rawType: 'String',
         rawValue: r"'hello\n\t\r\v\b'",
       ),
-      Constant(name: 'TEST13', rawType: 'String', rawValue: r"'test\\'"),
-      Constant(
+      MacroConstant(name: 'TEST13', rawType: 'String', rawValue: r"'test\\'"),
+      MacroConstant(
         name: 'TEST14',
         rawType: 'double',
         rawValue: strings.doubleInfinity,
       ),
-      Constant(
+      MacroConstant(
         name: 'TEST15',
         rawType: 'double',
         rawValue: strings.doubleNegativeInfinity,
       ),
-      Constant(name: 'TEST16', rawType: 'double', rawValue: strings.doubleNaN),
-      Constant(name: 'TEST17', rawType: 'int', rawValue: '0'),
-      Constant(name: 'TEST18', rawType: 'int', rawValue: '4'),
-      Constant(name: 'TEST19', rawType: 'int', rawValue: '8'),
+      MacroConstant(
+        name: 'TEST16',
+        rawType: 'double',
+        rawValue: strings.doubleNaN,
+      ),
+      MacroConstant(name: 'TEST17', rawType: 'int', rawValue: '0'),
+      MacroConstant(name: 'TEST18', rawType: 'int', rawValue: '4'),
+      MacroConstant(name: 'TEST19', rawType: 'int', rawValue: '8'),
     ],
   )..forceFillNamesForTesting();
 }

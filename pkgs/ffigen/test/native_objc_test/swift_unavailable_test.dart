@@ -18,15 +18,17 @@ void main() {
   group('swift_unavailable', () {
     late final String bindings;
 
-    setUpAll(() {
-      FfiGenerator(
+    setUpAll(() async {
+      final generator = FfiGenerator(
         output: Output(
-          dartFile: Uri.file(
-            path.join(
-              packagePathForTests,
-              'test',
-              'native_objc_test',
-              'swift_unavailable_test_bindings.dart',
+          dart: DartOutput(
+            path: Uri.file(
+              path.join(
+                packagePathForTests,
+                'test',
+                'native_objc_test',
+                'swift_unavailable_test_bindings.dart',
+              ),
             ),
           ),
           format: false,
@@ -47,12 +49,15 @@ void main() {
             ),
           ],
         ),
-        objectiveC: ObjectiveC(
-          interfaces: Interfaces(
-            include: (decl) => {'Animal'}.contains(decl.originalName),
+        objectiveC: const ObjectiveC(),
+        visitors: [
+          Visitor(
+            objCInterface: (node) =>
+                node.isIncluded = node.originalName == 'Animal',
           ),
-        ),
-      ).generate(logger: createTestLogger());
+        ],
+      );
+      await generator.generate(logger: createTestLogger());
       final file = path.join(
         packagePathForTests,
         'test',

@@ -12,8 +12,8 @@ import 'package:jnigen/tools.dart';
 ///
 /// Useful for running standalone examples on already generated sources.
 void main(List<String> args) async {
-  final config = Config.parseArgs(args);
-  final mavenDownloads = config.mavenDownloads;
+  final config = JniGenerator.parseArgs(args);
+  final mavenDownloads = config.input.mavenDownloads;
   if (mavenDownloads != null) {
     await GradleTools.downloadMavenSources(
         GradleTools.deps(mavenDownloads.sourceDeps), mavenDownloads.sourceDir);
@@ -23,7 +23,7 @@ void main(List<String> args) async {
         GradleTools.deps(
             mavenDownloads.jarOnlyDeps + mavenDownloads.sourceDeps),
         mavenDownloads.jarDir);
-    await Directory(mavenDownloads.jarDir)
+    await Directory.fromUri(mavenDownloads.jarDir)
         .list()
         .map((entry) => entry.path)
         .where((path) => path.endsWith('.jar'))

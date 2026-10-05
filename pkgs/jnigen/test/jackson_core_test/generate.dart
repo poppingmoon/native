@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:jnigen/jnigen.dart';
-import 'package:logging/logging.dart';
 import 'package:path/path.dart' hide equals;
 
 const jacksonPreamble = '// Generated from jackson-core which is licensed under'
@@ -26,41 +25,40 @@ const jacksonPreamble = '// Generated from jackson-core which is licensed under'
 
 const testName = 'jackson_core_test';
 final thirdPartyDir = join('test', testName, 'third_party');
-const deps = ['com.fasterxml.jackson.core:jackson-core:2.13.4'];
+const deps = ['com.fasterxml.jackson.core:jackson-core:2.13.5'];
 
-Config getConfig({
+JniGenerator getConfig({
   String? root,
   bool generateFullVersion = false,
-  bool useAsm = false,
+  SummarizerBackend? backend,
 }) {
   final rootDir = root ?? thirdPartyDir;
-  final config = Config(
-    mavenDownloads: MavenDownloads(
-      sourceDeps: deps,
-      sourceDir: join(thirdPartyDir, 'java'),
-      jarDir: join(thirdPartyDir, 'jar'),
+  final config = JniGenerator(
+    input: Input(
+      classes: generateFullVersion
+          ? ['com.fasterxml.jackson.core']
+          : [
+              'com.fasterxml.jackson.core.JsonFactory',
+              'com.fasterxml.jackson.core.JsonParser',
+              'com.fasterxml.jackson.core.JsonToken',
+            ],
+      mavenDownloads: MavenDownloads(
+        sourceDeps: deps,
+        sourceDir: Uri.directory(join(thirdPartyDir, 'java')),
+        jarDir: Uri.directory(join(thirdPartyDir, 'jar')),
+      ),
+      backend: backend,
     ),
-    summarizerOptions: SummarizerOptions(
-      backend: useAsm ? SummarizerBackend.asm : null,
-    ),
-    preamble: jacksonPreamble,
-    outputConfig: OutputConfig(
-      dartConfig: DartCodeOutputConfig(
+    output: Output(
+      dart: DartOutput(
         path: Uri.directory(join(rootDir, 'bindings')),
       ),
+      preamble: jacksonPreamble,
     ),
-    classes: generateFullVersion
-        ? ['com.fasterxml.jackson.core']
-        : [
-            'com.fasterxml.jackson.core.JsonFactory',
-            'com.fasterxml.jackson.core.JsonParser',
-            'com.fasterxml.jackson.core.JsonToken',
-          ],
-    logLevel: Level.INFO,
   );
   return config;
 }
 
 void main() async {
-  await generateJniBindings(getConfig());
+  await getConfig().generate();
 }
